@@ -4,7 +4,10 @@ package export
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
+	"github.com/chrisedwards/slack-export/internal/channels"
 	"github.com/chrisedwards/slack-export/internal/config"
 	"github.com/chrisedwards/slack-export/internal/slack"
 )
@@ -70,4 +73,70 @@ func (e *Exporter) SlackdumpPath() string {
 // Credentials returns the Slack credentials.
 func (e *Exporter) Credentials() *slack.Credentials {
 	return e.creds
+}
+
+// ExportDate exports Slack messages for a single date.
+// It orchestrates the full workflow: gets channels, filters them,
+// archives via slackdump, formats to text, and organizes output.
+func (e *Exporter) ExportDate(ctx context.Context, date string) error {
+	start, end, err := GetDateBounds(date, e.cfg.Timezone)
+	if err != nil {
+		return fmt.Errorf("calculating date bounds: %w", err)
+	}
+
+	allChannels, err := e.edgeClient.GetActiveChannels(ctx, start)
+	if err != nil {
+		return fmt.Errorf("getting active channels: %w", err)
+	}
+
+	if len(allChannels) == 0 {
+		fmt.Printf("No active channels found for %s\n", date)
+		return nil
+	}
+
+	filtered := channels.FilterChannels(allChannels, e.cfg.Include, e.cfg.Exclude)
+	if len(filtered) == 0 {
+		fmt.Printf("All channels filtered out for %s\n", date)
+		return nil
+	}
+
+	fmt.Printf("Exporting %d channels for %s\n", len(filtered), date)
+
+	ids, names := buildChannelMaps(filtered)
+
+	archiveDir, err := Archive(ctx, e.slackdump, ids, start, end)
+	if err != nil {
+		return fmt.Errorf("archiving channels: %w", err)
+	}
+	defer cleanupTempDir(archiveDir)
+
+	zipPath, err := FormatText(ctx, e.slackdump, archiveDir)
+	if err != nil {
+		return fmt.Errorf("formatting text: %w", err)
+	}
+
+	if err := ExtractAndProcess(zipPath, e.cfg.OutputDir, date, names); err != nil {
+		return fmt.Errorf("extracting output: %w", err)
+	}
+
+	fmt.Printf("Successfully exported %d channels to %s/%s/\n", len(filtered), e.cfg.OutputDir, date)
+	return nil
+}
+
+// buildChannelMaps builds a list of channel IDs and a map of ID to name.
+func buildChannelMaps(chans []slack.Channel) ([]string, map[string]string) {
+	ids := make([]string, 0, len(chans))
+	names := make(map[string]string, len(chans))
+	for _, ch := range chans {
+		ids = append(ids, ch.ID)
+		names[ch.ID] = ch.Name
+	}
+	return ids, names
+}
+
+// cleanupTempDir removes the temporary directory created by Archive.
+func cleanupTempDir(archiveDir string) {
+	if archiveDir != "" {
+		_ = os.RemoveAll(filepath.Dir(archiveDir))
+	}
 }

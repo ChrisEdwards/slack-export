@@ -228,3 +228,177 @@ func TestExporterIntegration_WithMockDependencies(t *testing.T) {
 		t.Errorf("expected 1 channel, got %d", len(channels))
 	}
 }
+
+func TestExportDate_InvalidDate(t *testing.T) {
+	e := &Exporter{
+		cfg: &config.Config{Timezone: "America/New_York"},
+	}
+
+	err := e.ExportDate(context.Background(), "not-a-date")
+	if err == nil {
+		t.Error("ExportDate() should fail with invalid date")
+	}
+	if !strings.Contains(err.Error(), "calculating date bounds") {
+		t.Errorf("error should mention date bounds: %v", err)
+	}
+}
+
+func TestExportDate_InvalidTimezone(t *testing.T) {
+	e := &Exporter{
+		cfg: &config.Config{Timezone: "Invalid/Timezone"},
+	}
+
+	err := e.ExportDate(context.Background(), "2026-01-22")
+	if err == nil {
+		t.Error("ExportDate() should fail with invalid timezone")
+	}
+	if !strings.Contains(err.Error(), "calculating date bounds") {
+		t.Errorf("error should mention date bounds: %v", err)
+	}
+}
+
+func TestExportDate_NoActiveChannels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {"id": "U123", "team_id": "T999"},
+				"team": {"id": "T999", "name": "Test"},
+				"channels": [],
+				"ims": []
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			_, _ = w.Write([]byte(`{"ok": true, "channels": []}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
+	e := &Exporter{
+		cfg:        &config.Config{Timezone: "America/New_York"},
+		edgeClient: slack.NewEdgeClient(creds).WithBaseURL(server.URL),
+	}
+
+	err := e.ExportDate(context.Background(), "2026-01-22")
+	if err != nil {
+		t.Errorf("ExportDate() should succeed with no active channels: %v", err)
+	}
+}
+
+func TestExportDate_AllChannelsFilteredOut(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {"id": "U123", "team_id": "T999"},
+				"team": {"id": "T999", "name": "Test"},
+				"channels": [{"id": "C001", "name": "general", "is_channel": true}],
+				"ims": []
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"channels": [{"id": "C001", "latest": "1737676900.123456"}]
+			}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
+	e := &Exporter{
+		cfg: &config.Config{
+			Timezone: "America/New_York",
+			Exclude:  []string{"general"}, // Exclude all channels
+		},
+		edgeClient: slack.NewEdgeClient(creds).WithBaseURL(server.URL),
+	}
+
+	err := e.ExportDate(context.Background(), "2026-01-22")
+	if err != nil {
+		t.Errorf("ExportDate() should succeed when all filtered out: %v", err)
+	}
+}
+
+func TestExportDate_EdgeAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"ok": false, "error": "server_error"}`))
+	}))
+	defer server.Close()
+
+	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
+	e := &Exporter{
+		cfg:        &config.Config{Timezone: "America/New_York"},
+		edgeClient: slack.NewEdgeClient(creds).WithBaseURL(server.URL),
+	}
+
+	err := e.ExportDate(context.Background(), "2026-01-22")
+	if err == nil {
+		t.Error("ExportDate() should fail on Edge API error")
+	}
+	if !strings.Contains(err.Error(), "getting active channels") {
+		t.Errorf("error should mention getting channels: %v", err)
+	}
+}
+
+func TestBuildChannelMaps(t *testing.T) {
+	chans := []slack.Channel{
+		{ID: "C001", Name: "general"},
+		{ID: "C002", Name: "random"},
+		{ID: "D001", Name: "dm_bob"},
+	}
+
+	ids, names := buildChannelMaps(chans)
+
+	if len(ids) != 3 {
+		t.Errorf("expected 3 ids, got %d", len(ids))
+	}
+
+	expectedIDs := []string{"C001", "C002", "D001"}
+	for i, id := range ids {
+		if id != expectedIDs[i] {
+			t.Errorf("ids[%d] = %q, want %q", i, id, expectedIDs[i])
+		}
+	}
+
+	if names["C001"] != "general" {
+		t.Errorf("names[C001] = %q, want general", names["C001"])
+	}
+	if names["C002"] != "random" {
+		t.Errorf("names[C002] = %q, want random", names["C002"])
+	}
+	if names["D001"] != "dm_bob" {
+		t.Errorf("names[D001] = %q, want dm_bob", names["D001"])
+	}
+}
+
+func TestBuildChannelMaps_Empty(t *testing.T) {
+	ids, names := buildChannelMaps(nil)
+
+	if len(ids) != 0 {
+		t.Errorf("expected empty ids, got %d", len(ids))
+	}
+	if len(names) != 0 {
+		t.Errorf("expected empty names, got %d", len(names))
+	}
+}
+
+func TestCleanupTempDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	subDir := filepath.Join(tmpDir, "slackdump_20260122")
+	if err := os.MkdirAll(subDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupTempDir(subDir)
+
+	if _, err := os.Stat(tmpDir); !os.IsNotExist(err) {
+		t.Error("cleanupTempDir should remove parent directory")
+	}
+}
+
+func TestCleanupTempDir_EmptyPath(t *testing.T) {
+	cleanupTempDir("")
+}
