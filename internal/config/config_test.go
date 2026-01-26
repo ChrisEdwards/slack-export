@@ -227,3 +227,45 @@ func TestValidate_CommonTimezones(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigFile_ReturnsUsedPath(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "test-config.yaml")
+
+	content := `output_dir: "/test/path"
+`
+	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.ConfigFile() != configPath {
+		t.Errorf("ConfigFile() = %q, want %q", cfg.ConfigFile(), configPath)
+	}
+}
+
+func TestConfigFile_EmptyWhenDefaultsUsed(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.ConfigFile() != "" {
+		t.Errorf("ConfigFile() = %q, want empty string when no config file found", cfg.ConfigFile())
+	}
+}
