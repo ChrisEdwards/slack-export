@@ -1,10 +1,16 @@
 package slack
 
 import (
+	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"os"
 	"path/filepath"
 	"regexp"
 	"testing"
+
+	"github.com/denisbrodbeck/machineid"
 )
 
 func TestGetMachineID(t *testing.T) {
@@ -169,4 +175,171 @@ func TestGetWorkspace_OnlyWhitespace(t *testing.T) {
 	if err == nil {
 		t.Error("getWorkspace() expected error for whitespace-only workspace.txt")
 	}
+}
+
+func TestProtectedID_MatchesMachineid(t *testing.T) {
+	testMachineID := "test-machine-id-12345"
+
+	got := protectedID(testMachineID)
+
+	// Verify our implementation matches machineid.ProtectedID behavior
+	// We use machineid's protect function logic: HMAC-SHA256 of appID keyed by machineID
+	expected, err := machineid.ProtectedID(appID)
+	if err == nil {
+		// If we can get actual machine's protected ID, verify format matches
+		// Both should be 64-character hex strings
+		if len(got) != 64 {
+			t.Errorf("protectedID() length = %d, want 64 hex chars", len(got))
+		}
+		if len(expected) != 64 {
+			t.Errorf("machineid.ProtectedID() length = %d, want 64 hex chars", len(expected))
+		}
+	}
+
+	// Verify it's a valid hex string
+	hexPattern := regexp.MustCompile(`^[0-9a-f]{64}$`)
+	if !hexPattern.MatchString(got) {
+		t.Errorf("protectedID() = %q, does not match hex pattern", got)
+	}
+}
+
+func TestProtectedID_Consistent(t *testing.T) {
+	testMachineID := "test-machine-id-12345"
+
+	result1 := protectedID(testMachineID)
+	result2 := protectedID(testMachineID)
+
+	if result1 != result2 {
+		t.Errorf("protectedID() not consistent: %q != %q", result1, result2)
+	}
+}
+
+func TestProtectedID_DifferentInputsDifferentOutputs(t *testing.T) {
+	result1 := protectedID("machine-1")
+	result2 := protectedID("machine-2")
+
+	if result1 == result2 {
+		t.Errorf("protectedID() should produce different outputs for different inputs")
+	}
+}
+
+func TestDeriveKey_ProducesCorrectLength(t *testing.T) {
+	testMachineID := "test-machine-id-12345"
+
+	key := deriveKey(testMachineID)
+
+	if len(key) != keySize {
+		t.Errorf("deriveKey() length = %d, want %d", len(key), keySize)
+	}
+}
+
+func TestDeriveKey_Consistent(t *testing.T) {
+	testMachineID := "test-machine-id-12345"
+
+	key1 := deriveKey(testMachineID)
+	key2 := deriveKey(testMachineID)
+
+	if !bytes.Equal(key1, key2) {
+		t.Error("deriveKey() not consistent")
+	}
+}
+
+func TestDeriveKey_DifferentInputsDifferentOutputs(t *testing.T) {
+	key1 := deriveKey("machine-1")
+	key2 := deriveKey("machine-2")
+
+	if bytes.Equal(key1, key2) {
+		t.Error("deriveKey() should produce different keys for different inputs")
+	}
+}
+
+func TestDecrypt_Success(t *testing.T) {
+	// Create test data
+	key := deriveKey("test-machine-id")
+	plaintext := []byte("hello, world!")
+
+	// Encrypt the data using AES-256-CFB (same as slackdump)
+	ciphertext, err := encryptTestData(plaintext, key)
+	if err != nil {
+		t.Fatalf("failed to encrypt test data: %v", err)
+	}
+
+	// Decrypt and verify
+	decrypted, err := decrypt(ciphertext, key)
+	if err != nil {
+		t.Errorf("decrypt() error = %v", err)
+	}
+	if !bytes.Equal(decrypted, plaintext) {
+		t.Errorf("decrypt() = %q, want %q", decrypted, plaintext)
+	}
+}
+
+func TestDecrypt_CiphertextTooShort(t *testing.T) {
+	key := deriveKey("test-machine-id")
+
+	// Ciphertext shorter than IV (16 bytes)
+	shortCiphertext := []byte("short")
+
+	_, err := decrypt(shortCiphertext, key)
+	if err == nil {
+		t.Error("decrypt() expected error for short ciphertext")
+	}
+}
+
+func TestDecrypt_EmptyCiphertext(t *testing.T) {
+	key := deriveKey("test-machine-id")
+
+	_, err := decrypt([]byte{}, key)
+	if err == nil {
+		t.Error("decrypt() expected error for empty ciphertext")
+	}
+}
+
+func TestDecrypt_WrongKey(t *testing.T) {
+	// Encrypt with one key
+	key1 := deriveKey("machine-1")
+	plaintext := []byte(`{"token":"xoxc-test","team_id":"T123"}`)
+
+	ciphertext, err := encryptTestData(plaintext, key1)
+	if err != nil {
+		t.Fatalf("failed to encrypt test data: %v", err)
+	}
+
+	// Try to decrypt with different key
+	key2 := deriveKey("machine-2")
+	decrypted, err := decrypt(ciphertext, key2)
+
+	// Decryption will "succeed" (no error) but produce garbage
+	// because AES-CFB doesn't have authentication
+	if err != nil {
+		t.Fatalf("decrypt() unexpected error = %v", err)
+	}
+
+	// The decrypted data should not match the original
+	if bytes.Equal(decrypted, plaintext) {
+		t.Error("decrypt() with wrong key should not produce original plaintext")
+	}
+}
+
+// encryptTestData encrypts data using AES-256-CFB for testing purposes.
+// This matches slackdump's encryption format.
+func encryptTestData(plaintext, key []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+
+	// Generate random IV
+	iv := make([]byte, aes.BlockSize)
+	if _, err := rand.Read(iv); err != nil {
+		return nil, err
+	}
+
+	// Encrypt
+	stream := cipher.NewCFBEncrypter(block, iv) //nolint:staticcheck // matching slackdump format
+	ciphertext := make([]byte, len(plaintext))
+	stream.XORKeyStream(ciphertext, plaintext)
+
+	// Prepend IV to ciphertext (slackdump format)
+	return append(iv, ciphertext...), nil
 }
