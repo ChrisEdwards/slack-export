@@ -30,6 +30,18 @@ func (f *Filter) Apply(channels []slack.Channel) []slack.Channel {
 	return channels
 }
 
+// MatchAny checks if a value matches any pattern in a list.
+// Returns true if any pattern matches, false for empty pattern list.
+// Short-circuits on first match.
+func MatchAny(patterns []string, value string) bool {
+	for _, pattern := range patterns {
+		if MatchPattern(pattern, value) {
+			return true
+		}
+	}
+	return false
+}
+
 // MatchPattern matches a value against a glob pattern.
 // Supports glob patterns (* matches any sequence, ? matches single character).
 // Matching is case-insensitive. Returns false for invalid patterns.
