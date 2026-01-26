@@ -203,3 +203,81 @@ func (c *EdgeClient) ClientCounts(ctx context.Context) (*CountsResponse, error) 
 
 	return &resp, nil
 }
+
+// GetActiveChannels returns channels with activity since the given time.
+// Combines channel metadata from userBoot with timestamps from counts.
+// If since is zero time, returns all channels.
+func (c *EdgeClient) GetActiveChannels(ctx context.Context, since time.Time) ([]Channel, error) {
+	boot, err := c.ClientUserBoot(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("userBoot: %w", err)
+	}
+
+	counts, err := c.ClientCounts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("counts: %w", err)
+	}
+
+	latestByID := buildTimestampLookup(counts)
+	includeAll := since.IsZero()
+
+	var active []Channel
+
+	for _, ch := range boot.Channels {
+		latest := latestByID[ch.ID]
+		if !includeAll && (latest.IsZero() || latest.Before(since)) {
+			continue
+		}
+		active = append(active, Channel{
+			ID:          ch.ID,
+			Name:        ch.Name,
+			IsChannel:   ch.IsChannel,
+			IsGroup:     ch.IsGroup,
+			IsPrivate:   ch.IsPrivate,
+			IsArchived:  ch.IsArchived,
+			IsMember:    ch.IsMember,
+			IsMPIM:      ch.IsMpim,
+			LastMessage: latest,
+		})
+	}
+
+	for _, im := range boot.IMs {
+		latest := latestByID[im.ID]
+		if !includeAll && (latest.IsZero() || latest.Before(since)) {
+			continue
+		}
+		active = append(active, Channel{
+			ID:          im.ID,
+			Name:        fmt.Sprintf("dm_%s", im.User),
+			IsIM:        true,
+			LastMessage: latest,
+		})
+	}
+
+	return active, nil
+}
+
+// buildTimestampLookup creates a map from channel ID to latest message time.
+func buildTimestampLookup(counts *CountsResponse) map[string]time.Time {
+	lookup := make(map[string]time.Time)
+
+	for _, ch := range counts.Channels {
+		if t, err := ParseSlackTS(ch.Latest); err == nil && !t.IsZero() {
+			lookup[ch.ID] = t
+		}
+	}
+
+	for _, im := range counts.IMs {
+		if t, err := ParseSlackTS(im.Latest); err == nil && !t.IsZero() {
+			lookup[im.ID] = t
+		}
+	}
+
+	for _, mpim := range counts.MPIMs {
+		if t, err := ParseSlackTS(mpim.Latest); err == nil && !t.IsZero() {
+			lookup[mpim.ID] = t
+		}
+	}
+
+	return lookup
+}

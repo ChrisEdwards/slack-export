@@ -873,3 +873,373 @@ func TestParseSlackTS_RoundTrip(t *testing.T) {
 		t.Errorf("ParseSlackTS(%q) = %v, want %v", ts, got, expected)
 	}
 }
+
+func TestEdgeClient_GetActiveChannels_Success(t *testing.T) {
+	// Create test server that responds to both endpoints
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {"id": "U123", "team_id": "T123", "name": "testuser"},
+				"team": {"id": "T123", "name": "Test Team", "domain": "test"},
+				"ims": [
+					{"id": "D123", "user": "U456", "is_im": true, "is_open": true, "latest": "1737676800.000000"},
+					{"id": "D789", "user": "U999", "is_im": true, "is_open": true, "latest": "1737500000.000000"}
+				],
+				"channels": [
+					{"id": "C001", "name": "active-channel", "is_channel": true, "is_member": true, "created": 1609459200},
+					{"id": "C002", "name": "old-channel", "is_channel": true, "is_member": true, "created": 1609459200},
+					{"id": "G003", "name": "private-group", "is_group": true, "is_private": true, "is_member": true, "created": 1609459200}
+				]
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"channels": [
+					{"id": "C001", "latest": "1737676900.123456"},
+					{"id": "C002", "latest": "1737500000.000000"},
+					{"id": "G003", "latest": "1737676950.000000"}
+				],
+				"ims": [
+					{"id": "D123", "latest": "1737676800.000000"},
+					{"id": "D789", "latest": "1737500000.000000"}
+				]
+			}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	// Filter to channels active after Jan 24, 2025 00:00:00 UTC
+	since := time.Date(2025, 1, 24, 0, 0, 0, 0, time.UTC)
+
+	channels, err := client.GetActiveChannels(context.Background(), since)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have 3 channels: C001 (active-channel), G003 (private-group), D123 (dm)
+	// C002 and D789 should be filtered out (too old)
+	if len(channels) != 3 {
+		t.Fatalf("expected 3 active channels, got %d", len(channels))
+	}
+
+	// Verify C001 is included
+	foundC001 := false
+	for _, ch := range channels {
+		if ch.ID == "C001" {
+			foundC001 = true
+			if ch.Name != "active-channel" {
+				t.Errorf("C001 name: expected active-channel, got %s", ch.Name)
+			}
+			if !ch.IsChannel {
+				t.Error("C001 should be a channel")
+			}
+			if !ch.IsMember {
+				t.Error("C001 should have IsMember true")
+			}
+		}
+	}
+	if !foundC001 {
+		t.Error("C001 (active-channel) should be in results")
+	}
+
+	// Verify G003 is included
+	foundG003 := false
+	for _, ch := range channels {
+		if ch.ID == "G003" {
+			foundG003 = true
+			if !ch.IsGroup {
+				t.Error("G003 should be a group")
+			}
+			if !ch.IsPrivate {
+				t.Error("G003 should be private")
+			}
+		}
+	}
+	if !foundG003 {
+		t.Error("G003 (private-group) should be in results")
+	}
+
+	// Verify D123 DM is included
+	foundD123 := false
+	for _, ch := range channels {
+		if ch.ID == "D123" {
+			foundD123 = true
+			if !ch.IsIM {
+				t.Error("D123 should be an IM")
+			}
+			if ch.Name != "dm_U456" {
+				t.Errorf("D123 name: expected dm_U456, got %s", ch.Name)
+			}
+		}
+	}
+	if !foundD123 {
+		t.Error("D123 (dm) should be in results")
+	}
+
+	// Verify C002 is NOT included (too old)
+	for _, ch := range channels {
+		if ch.ID == "C002" {
+			t.Error("C002 (old-channel) should NOT be in results")
+		}
+	}
+}
+
+func TestEdgeClient_GetActiveChannels_ZeroSince(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {"id": "U123", "team_id": "T123", "name": "testuser"},
+				"team": {"id": "T123", "name": "Test Team", "domain": "test"},
+				"ims": [{"id": "D123", "user": "U456", "is_im": true}],
+				"channels": [
+					{"id": "C001", "name": "channel-1", "is_channel": true, "created": 1609459200},
+					{"id": "C002", "name": "channel-2", "is_channel": true, "created": 1609459200}
+				]
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"channels": [
+					{"id": "C001", "latest": "1737676900.123456"},
+					{"id": "C002", "latest": ""}
+				],
+				"ims": [{"id": "D123", "latest": "1737676800.000000"}]
+			}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	// Zero since time should return all channels
+	channels, err := client.GetActiveChannels(context.Background(), time.Time{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have all 3 channels (C001, C002, D123)
+	if len(channels) != 3 {
+		t.Fatalf("expected 3 channels with zero since, got %d", len(channels))
+	}
+}
+
+func TestEdgeClient_GetActiveChannels_UserBootError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok": false, "error": "invalid_auth"}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	_, err := client.GetActiveChannels(context.Background(), time.Now())
+	if err == nil {
+		t.Fatal("expected error from userBoot failure")
+	}
+
+	if !strings.Contains(err.Error(), "userBoot") {
+		t.Errorf("error should mention userBoot: %v", err)
+	}
+}
+
+func TestEdgeClient_GetActiveChannels_CountsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {"id": "U123", "team_id": "T123", "name": "testuser"},
+				"team": {"id": "T123", "name": "Test Team", "domain": "test"},
+				"ims": [],
+				"channels": []
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok": false, "error": "rate_limited"}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	_, err := client.GetActiveChannels(context.Background(), time.Now())
+	if err == nil {
+		t.Fatal("expected error from counts failure")
+	}
+
+	if !strings.Contains(err.Error(), "counts") {
+		t.Errorf("error should mention counts: %v", err)
+	}
+}
+
+func TestEdgeClient_GetActiveChannels_EmptyResults(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {"id": "U123", "team_id": "T123", "name": "testuser"},
+				"team": {"id": "T123", "name": "Test Team", "domain": "test"},
+				"ims": [],
+				"channels": []
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok": true}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	channels, err := client.GetActiveChannels(context.Background(), time.Now())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(channels) != 0 {
+		t.Errorf("expected empty results, got %d channels", len(channels))
+	}
+}
+
+func TestEdgeClient_GetActiveChannels_MPIMs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {"id": "U123", "team_id": "T123", "name": "testuser"},
+				"team": {"id": "T123", "name": "Test Team", "domain": "test"},
+				"ims": [],
+				"channels": [
+					{"id": "G001", "name": "mpim-group", "is_mpim": true, "is_group": true, "created": 1609459200}
+				]
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"mpims": [{"id": "G001", "latest": "1737676900.000000"}]
+			}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	// Filter to recent activity
+	since := time.Date(2025, 1, 24, 0, 0, 0, 0, time.UTC)
+
+	channels, err := client.GetActiveChannels(context.Background(), since)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(channels) != 1 {
+		t.Fatalf("expected 1 MPIM channel, got %d", len(channels))
+	}
+
+	if !channels[0].IsMPIM {
+		t.Error("expected channel to have IsMPIM=true")
+	}
+}
+
+func TestBuildTimestampLookup(t *testing.T) {
+	counts := &CountsResponse{
+		OK: true,
+		Channels: []ChannelSnapshot{
+			{ID: "C001", Latest: "1737676900.123456"},
+			{ID: "C002", Latest: "1737676800.000000"},
+			{ID: "C003", Latest: ""}, // Empty latest
+		},
+		IMs: []ChannelSnapshot{
+			{ID: "D001", Latest: "1737676700.000000"},
+		},
+		MPIMs: []ChannelSnapshot{
+			{ID: "G001", Latest: "1737676600.000000"},
+		},
+	}
+
+	lookup := buildTimestampLookup(counts)
+
+	// Should have 4 entries (C003 excluded due to empty latest)
+	if len(lookup) != 4 {
+		t.Fatalf("expected 4 entries, got %d", len(lookup))
+	}
+
+	// Check C001
+	if _, ok := lookup["C001"]; !ok {
+		t.Error("C001 should be in lookup")
+	}
+
+	// Check D001
+	if _, ok := lookup["D001"]; !ok {
+		t.Error("D001 should be in lookup")
+	}
+
+	// Check G001
+	if _, ok := lookup["G001"]; !ok {
+		t.Error("G001 should be in lookup")
+	}
+
+	// C003 should NOT be in lookup (empty latest)
+	if _, ok := lookup["C003"]; ok {
+		t.Error("C003 should NOT be in lookup (empty latest)")
+	}
+}
+
+func TestBuildTimestampLookup_EmptyCounts(t *testing.T) {
+	counts := &CountsResponse{OK: true}
+
+	lookup := buildTimestampLookup(counts)
+
+	if len(lookup) != 0 {
+		t.Errorf("expected empty lookup, got %d entries", len(lookup))
+	}
+}
