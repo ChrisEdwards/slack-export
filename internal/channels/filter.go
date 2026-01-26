@@ -2,7 +2,12 @@
 // based on glob patterns.
 package channels
 
-import "github.com/chrisedwards/slack-export/internal/slack"
+import (
+	"path/filepath"
+	"strings"
+
+	"github.com/chrisedwards/slack-export/internal/slack"
+)
 
 // Filter applies include/exclude patterns to a list of channels.
 type Filter struct {
@@ -23,4 +28,21 @@ func NewFilter(include, exclude []string) *Filter {
 func (f *Filter) Apply(channels []slack.Channel) []slack.Channel {
 	// TODO: Implement glob-based filtering
 	return channels
+}
+
+// MatchPattern matches a value against a glob pattern.
+// Supports glob patterns (* matches any sequence, ? matches single character).
+// Matching is case-insensitive. Returns false for invalid patterns.
+func MatchPattern(pattern, value string) bool {
+	matched, err := filepath.Match(pattern, value)
+	if err != nil {
+		return false
+	}
+	if matched {
+		return true
+	}
+	lowerPattern := strings.ToLower(pattern)
+	lowerValue := strings.ToLower(value)
+	matched, _ = filepath.Match(lowerPattern, lowerValue)
+	return matched
 }
