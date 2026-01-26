@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -58,8 +59,6 @@ func (c *EdgeClient) WithHTTPClient(client *http.Client) *EdgeClient {
 // post sends an authenticated POST request to the Edge API.
 // The endpoint is appended to {baseURL}/cache/{TeamID}/{endpoint}.
 // Token is automatically added to the form body. Cookies from credentials are set.
-//
-//nolint:unused // Used by ClientUserBoot() and ClientCounts() methods (se-94m, se-15p)
 func (c *EdgeClient) post(ctx context.Context, endpoint string, body map[string]any) ([]byte, error) {
 	requestURL := fmt.Sprintf("%s/cache/%s/%s", c.baseURL, c.creds.TeamID, endpoint)
 
@@ -101,8 +100,6 @@ func (c *EdgeClient) post(ctx context.Context, endpoint string, body map[string]
 }
 
 // formatValue converts a value to string for form encoding.
-//
-//nolint:unused // Helper for post() method
 func formatValue(v any) string {
 	switch val := v.(type) {
 	case string:
@@ -123,8 +120,49 @@ func formatValue(v any) string {
 	}
 }
 
-// ListChannels returns all channels the user has access to using the Edge API.
-func (c *EdgeClient) ListChannels(ctx context.Context) ([]Channel, error) {
-	// TODO: Implement Edge API channel listing
-	return nil, nil
+// ClientUserBoot calls the client.userBoot Edge API endpoint.
+// Returns all channels, DMs, and groups the user has access to with metadata.
+func (c *EdgeClient) ClientUserBoot(ctx context.Context) (*UserBootResponse, error) {
+	data, err := c.post(ctx, "client.userBoot", map[string]any{
+		"include_permissions": true,
+		"only_self_subteams":  true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var resp UserBootResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("parsing userBoot response: %w", err)
+	}
+
+	if !resp.OK {
+		return nil, fmt.Errorf("userBoot API error: %s", resp.Error)
+	}
+
+	return &resp, nil
+}
+
+// ClientCounts calls the client.counts Edge API endpoint.
+// Returns activity timestamps showing when each channel last had a message.
+func (c *EdgeClient) ClientCounts(ctx context.Context) (*CountsResponse, error) {
+	data, err := c.post(ctx, "client.counts", map[string]any{
+		"thread_counts_by_channel": true,
+		"org_wide_aware":           true,
+		"include_file_channels":    true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var resp CountsResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("parsing counts response: %w", err)
+	}
+
+	if !resp.OK {
+		return nil, fmt.Errorf("counts API error: %s", resp.Error)
+	}
+
+	return &resp, nil
 }

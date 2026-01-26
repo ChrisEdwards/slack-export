@@ -412,3 +412,339 @@ func TestFormatValue(t *testing.T) {
 		})
 	}
 }
+
+func TestEdgeClient_ClientUserBoot_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"ok": true,
+			"self": {"id": "U123", "team_id": "T123", "name": "testuser"},
+			"team": {"id": "T123", "name": "Test Team", "domain": "test"},
+			"ims": [{"id": "D123", "user": "U456", "is_im": true, "is_open": true}],
+			"channels": [
+				{"id": "C123", "name": "general", "is_channel": true, "is_member": true, "created": 1609459200},
+				{"id": "G456", "name": "private", "is_group": true, "is_private": true, "is_archived": true, "created": 1609459200}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	resp, err := client.ClientUserBoot(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !resp.OK {
+		t.Error("expected OK to be true")
+	}
+
+	if resp.Self.ID != "U123" {
+		t.Errorf("expected Self.ID U123, got %s", resp.Self.ID)
+	}
+
+	if resp.Team.Name != "Test Team" {
+		t.Errorf("expected Team.Name Test Team, got %s", resp.Team.Name)
+	}
+
+	if len(resp.IMs) != 1 {
+		t.Fatalf("expected 1 IM, got %d", len(resp.IMs))
+	}
+
+	if len(resp.Channels) != 2 {
+		t.Fatalf("expected 2 channels, got %d", len(resp.Channels))
+	}
+
+	if resp.Channels[0].Name != "general" {
+		t.Errorf("expected first channel name general, got %s", resp.Channels[0].Name)
+	}
+
+	if !resp.Channels[1].IsArchived {
+		t.Error("expected second channel to be archived")
+	}
+}
+
+func TestEdgeClient_ClientUserBoot_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok": false, "error": "invalid_auth"}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	_, err := client.ClientUserBoot(context.Background())
+	if err == nil {
+		t.Fatal("expected error for API error response")
+	}
+
+	if !strings.Contains(err.Error(), "invalid_auth") {
+		t.Errorf("expected error to contain 'invalid_auth': %v", err)
+	}
+}
+
+func TestEdgeClient_ClientUserBoot_ParseError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`not valid json`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	_, err := client.ClientUserBoot(context.Background())
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+
+	if !strings.Contains(err.Error(), "parsing userBoot response") {
+		t.Errorf("expected parsing error message: %v", err)
+	}
+}
+
+func TestEdgeClient_ClientCounts_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"ok": true,
+			"channels": [
+				{"id": "C123", "last_read": "1737676800.000000", "latest": "1737676900.123456", "mention_count": 5, "has_unreads": true},
+				{"id": "C456", "last_read": "1737676500.000000", "latest": "1737676500.000000", "mention_count": 0, "has_unreads": false}
+			],
+			"mpims": [
+				{"id": "G789", "last_read": "1737676000.000000", "latest": "1737676100.000000", "mention_count": 1, "has_unreads": true}
+			],
+			"ims": [
+				{"id": "D111", "last_read": "1737675000.000000", "latest": "1737675500.000000", "mention_count": 0, "has_unreads": false}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	resp, err := client.ClientCounts(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !resp.OK {
+		t.Error("expected OK to be true")
+	}
+
+	if len(resp.Channels) != 2 {
+		t.Fatalf("expected 2 channels, got %d", len(resp.Channels))
+	}
+
+	if resp.Channels[0].Latest != "1737676900.123456" {
+		t.Errorf("expected Latest 1737676900.123456, got %s", resp.Channels[0].Latest)
+	}
+
+	if resp.Channels[0].MentionCount != 5 {
+		t.Errorf("expected MentionCount 5, got %d", resp.Channels[0].MentionCount)
+	}
+
+	if !resp.Channels[0].HasUnreads {
+		t.Error("expected HasUnreads to be true")
+	}
+
+	if len(resp.MPIMs) != 1 {
+		t.Fatalf("expected 1 MPIM, got %d", len(resp.MPIMs))
+	}
+
+	if len(resp.IMs) != 1 {
+		t.Fatalf("expected 1 IM, got %d", len(resp.IMs))
+	}
+}
+
+func TestEdgeClient_ClientCounts_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok": false, "error": "not_authed"}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	_, err := client.ClientCounts(context.Background())
+	if err == nil {
+		t.Fatal("expected error for API error response")
+	}
+
+	if !strings.Contains(err.Error(), "not_authed") {
+		t.Errorf("expected error to contain 'not_authed': %v", err)
+	}
+}
+
+func TestEdgeClient_ClientCounts_ParseError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{invalid json`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	_, err := client.ClientCounts(context.Background())
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+
+	if !strings.Contains(err.Error(), "parsing counts response") {
+		t.Errorf("expected parsing error message: %v", err)
+	}
+}
+
+func TestEdgeClient_ClientCounts_EmptyResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok": true}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	resp, err := client.ClientCounts(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !resp.OK {
+		t.Error("expected OK to be true")
+	}
+
+	if resp.Channels != nil {
+		t.Error("expected Channels to be nil")
+	}
+
+	if resp.MPIMs != nil {
+		t.Error("expected MPIMs to be nil")
+	}
+
+	if resp.IMs != nil {
+		t.Error("expected IMs to be nil")
+	}
+}
+
+func TestEdgeClient_ClientUserBoot_RequestFormat(t *testing.T) {
+	var capturedBody string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		capturedBody = string(bodyBytes)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok": true, "self": {}, "team": {}, "ims": [], "channels": []}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	_, err := client.ClientUserBoot(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	formValues, err := url.ParseQuery(capturedBody)
+	if err != nil {
+		t.Fatalf("failed to parse form body: %v", err)
+	}
+
+	if formValues.Get("include_permissions") != "1" {
+		t.Errorf("expected include_permissions=1, got %s", formValues.Get("include_permissions"))
+	}
+
+	if formValues.Get("only_self_subteams") != "1" {
+		t.Errorf("expected only_self_subteams=1, got %s", formValues.Get("only_self_subteams"))
+	}
+}
+
+func TestEdgeClient_ClientCounts_RequestFormat(t *testing.T) {
+	var capturedBody string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		capturedBody = string(bodyBytes)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok": true}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	_, err := client.ClientCounts(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	formValues, err := url.ParseQuery(capturedBody)
+	if err != nil {
+		t.Fatalf("failed to parse form body: %v", err)
+	}
+
+	if formValues.Get("thread_counts_by_channel") != "1" {
+		t.Errorf("expected thread_counts_by_channel=1, got %s", formValues.Get("thread_counts_by_channel"))
+	}
+
+	if formValues.Get("org_wide_aware") != "1" {
+		t.Errorf("expected org_wide_aware=1, got %s", formValues.Get("org_wide_aware"))
+	}
+
+	if formValues.Get("include_file_channels") != "1" {
+		t.Errorf("expected include_file_channels=1, got %s", formValues.Get("include_file_channels"))
+	}
+}
