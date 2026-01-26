@@ -19,8 +19,8 @@ fi
 read -r -d '' PROMPT << 'EOF' || true
 Read AGENTS.md so it is fresh in your mind.
 1. **Find the bead to work on:** Use br to find any in-progress bead (which means you started but still need to finish it). If there are no in-progress beads, find the next ready bead. If there are no open beads left you can work on, output `<promise>COMPLETE</promise>`.
-2. **Set the bead to in-progress** Set the bead you are working on to in-progress. If this is a child bead of a parent, read the parent bead for context and set the parent to in-progress if it isn't already.
-3. **Create a plan:** Understand all the details of the bead (make sure you read the comments too) and come up with a plan and implement it.
+2. **Set the bead to in-progress** Set the bead you are working on to in-progress. If this is a child bead of a parent, read the parent bead for context and set the parent to in-progress if it isn't already. If the parent links to a design or plan file, read it to ensure you have the big picture.
+3. **Create a plan:** Understand all the details of the bead (make sure you read the comments too) and look at other related beads to ensure you tie your work into the whole. DOn't do work in a silo without understanding the work that has gone before you. Then come up with a plan and implement it.
 4. **Implement the bead:** Implement the bead. Ensure all your changes and additions are covered in tests.
 5. **Stop if context window is too low** If you are getting low in your context window, get to a stopping point, add a comment to the bead with your progress so the next agent can take over. Include anything you would want to know if you had to finish this bead but had no knowledge of what was done on it. Then stop. Write your progress as output to the user.
 6. **Check all feedback loops:** Make sure the project builds, that unit test pass, linters, etc. If there are issues, fix them. You are the only one working on this codebase, so you own all failures even if they seem unrealted to your changes. Do not leave flaky tests behind. Fix them.
