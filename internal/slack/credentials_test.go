@@ -741,3 +741,147 @@ func TestGetCredentialError(t *testing.T) {
 		t.Errorf("GetCredentialError() should unwrap to CredentialError, got %v", got)
 	}
 }
+
+func TestCredentials_Validate_Success(t *testing.T) {
+	creds := &Credentials{
+		Token:     "xoxc-T12345678-U12345678-1234567890-abc123",
+		TeamID:    "T12345678",
+		Workspace: "test-workspace",
+	}
+
+	if err := creds.Validate(); err != nil {
+		t.Errorf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestCredentials_Validate_EmptyToken(t *testing.T) {
+	creds := &Credentials{
+		Token:     "",
+		TeamID:    "T12345678",
+		Workspace: "test-workspace",
+	}
+
+	err := creds.Validate()
+	if err == nil {
+		t.Error("Validate() expected error for empty token")
+	}
+	if !strings.Contains(err.Error(), "token is empty") {
+		t.Errorf("Validate() error = %q, want error containing 'token is empty'", err)
+	}
+}
+
+func TestCredentials_Validate_WrongTokenFormat(t *testing.T) {
+	tests := []struct {
+		name         string
+		token        string
+		wantPreview  string
+		wantEllipsis bool
+	}{
+		{
+			name:         "xoxb token (bot token)",
+			token:        "xoxb-FAKE-TOKEN-FOR-TESTING-ONLY",
+			wantPreview:  "xoxb-FAKE-...",
+			wantEllipsis: true,
+		},
+		{
+			name:         "xoxp token (legacy)",
+			token:        "xoxp-FAKE-TOKEN-FOR-TESTING",
+			wantPreview:  "xoxp-FAKE-...",
+			wantEllipsis: true,
+		},
+		{
+			name:         "short invalid token",
+			token:        "invalid",
+			wantPreview:  "invalid",
+			wantEllipsis: false,
+		},
+		{
+			name:         "exactly 10 chars",
+			token:        "1234567890",
+			wantPreview:  "1234567890",
+			wantEllipsis: false,
+		},
+		{
+			name:         "11 chars (triggers truncation)",
+			token:        "12345678901",
+			wantPreview:  "1234567890...",
+			wantEllipsis: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			creds := &Credentials{
+				Token:     tt.token,
+				TeamID:    "T12345678",
+				Workspace: "test-workspace",
+			}
+
+			err := creds.Validate()
+			if err == nil {
+				t.Error("Validate() expected error for non-xoxc token")
+				return
+			}
+
+			errStr := err.Error()
+			if !strings.Contains(errStr, "unexpected token format") {
+				t.Errorf("Validate() error = %q, want error containing 'unexpected token format'", errStr)
+			}
+			if !strings.Contains(errStr, tt.wantPreview) {
+				t.Errorf("Validate() error = %q, want error containing preview %q", errStr, tt.wantPreview)
+			}
+		})
+	}
+}
+
+func TestCredentials_Validate_EmptyTeamID(t *testing.T) {
+	creds := &Credentials{
+		Token:     "xoxc-T12345678-U12345678-1234567890-abc123",
+		TeamID:    "",
+		Workspace: "test-workspace",
+	}
+
+	err := creds.Validate()
+	if err == nil {
+		t.Error("Validate() expected error for empty team ID")
+	}
+	if !strings.Contains(err.Error(), "team ID is missing") {
+		t.Errorf("Validate() error = %q, want error containing 'team ID is missing'", err)
+	}
+}
+
+func TestCredentials_Validate_MultipleErrors(t *testing.T) {
+	// When multiple fields are invalid, empty token takes precedence
+	creds := &Credentials{
+		Token:     "",
+		TeamID:    "",
+		Workspace: "",
+	}
+
+	err := creds.Validate()
+	if err == nil {
+		t.Error("Validate() expected error")
+	}
+	// Token check comes first
+	if !strings.Contains(err.Error(), "token is empty") {
+		t.Errorf("Validate() should check token first, got: %q", err)
+	}
+}
+
+func TestCredentials_Validate_TokenFormatBeforeTeamID(t *testing.T) {
+	// When token format is wrong and team ID is missing, token format error takes precedence
+	creds := &Credentials{
+		Token:     "xoxb-invalid",
+		TeamID:    "",
+		Workspace: "",
+	}
+
+	err := creds.Validate()
+	if err == nil {
+		t.Error("Validate() expected error")
+	}
+	// Token format check comes before team ID check
+	if !strings.Contains(err.Error(), "unexpected token format") {
+		t.Errorf("Validate() should check token format before team ID, got: %q", err)
+	}
+}

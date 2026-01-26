@@ -343,6 +343,27 @@ func deriveKey(machineID string) []byte {
 	return pbkdf2.Key([]byte(protected), salt, deriveIterations, keySize, sha512.New)
 }
 
+// Validate verifies that credentials are complete and correctly formatted.
+// Returns an error if the token is empty, has an unexpected format, or if
+// the team ID is missing.
+func (c *Credentials) Validate() error {
+	if c.Token == "" {
+		return errors.New("token is empty")
+	}
+	if !strings.HasPrefix(c.Token, "xoxc-") {
+		// Show token preview safely (avoid panic on short tokens)
+		preview := c.Token
+		if len(preview) > 10 {
+			preview = preview[:10] + "..."
+		}
+		return fmt.Errorf("unexpected token format: %s", preview)
+	}
+	if c.TeamID == "" {
+		return errors.New("team ID is missing")
+	}
+	return nil
+}
+
 // decrypt decrypts AES-256-CFB encrypted data using the provided key.
 // The first 16 bytes of ciphertext must be the initialization vector (IV).
 func decrypt(ciphertext, key []byte) ([]byte, error) {
