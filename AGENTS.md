@@ -68,6 +68,8 @@ make check VERBOSE=1
 make test VERBOSE=1
 ```
 
+**IMPORTANT**: Never start a bash command with a comment. Permissions fo those commands cannot be auto-approved, so permission will be denied for bash commands starting with comments.
+
 ---
 
 ## Quick Reference: br Commands
