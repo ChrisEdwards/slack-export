@@ -1,7 +1,12 @@
 package slack
 
 import (
+	"context"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -128,5 +133,282 @@ func TestDefaultConstants(t *testing.T) {
 
 	if DefaultHTTPTimeout != 30*time.Second {
 		t.Errorf("unexpected DefaultHTTPTimeout: %v", DefaultHTTPTimeout)
+	}
+}
+
+func TestEdgeClient_Post_Success(t *testing.T) {
+	var capturedRequest *http.Request
+	var capturedBody string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedRequest = r
+		bodyBytes, _ := io.ReadAll(r.Body)
+		capturedBody = string(bodyBytes)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+		Cookies: []*http.Cookie{
+			{Name: "d", Value: "test-cookie-value"},
+		},
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	body := map[string]any{
+		"key1": "value1",
+		"key2": 42,
+	}
+
+	result, err := client.post(context.Background(), "client.userBoot", body)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify response
+	if string(result) != `{"ok":true}` {
+		t.Errorf("unexpected response: %s", result)
+	}
+
+	// Verify URL path
+	expectedPath := "/cache/T12345/client.userBoot"
+	if capturedRequest.URL.Path != expectedPath {
+		t.Errorf("expected path %q, got %q", expectedPath, capturedRequest.URL.Path)
+	}
+
+	// Verify method
+	if capturedRequest.Method != http.MethodPost {
+		t.Errorf("expected POST method, got %s", capturedRequest.Method)
+	}
+
+	// Verify Content-Type header
+	contentType := capturedRequest.Header.Get("Content-Type")
+	if contentType != "application/x-www-form-urlencoded" {
+		t.Errorf("expected Content-Type application/x-www-form-urlencoded, got %s", contentType)
+	}
+
+	// Verify form body contains token
+	formValues, err := url.ParseQuery(capturedBody)
+	if err != nil {
+		t.Fatalf("failed to parse form body: %v", err)
+	}
+
+	if formValues.Get("token") != "xoxc-test-token" {
+		t.Errorf("expected token xoxc-test-token, got %s", formValues.Get("token"))
+	}
+
+	if formValues.Get("key1") != "value1" {
+		t.Errorf("expected key1=value1, got %s", formValues.Get("key1"))
+	}
+
+	if formValues.Get("key2") != "42" {
+		t.Errorf("expected key2=42, got %s", formValues.Get("key2"))
+	}
+
+	// Verify cookies
+	cookies := capturedRequest.Cookies()
+	var foundCookie bool
+	for _, c := range cookies {
+		if c.Name == "d" && c.Value == "test-cookie-value" {
+			foundCookie = true
+			break
+		}
+	}
+	if !foundCookie {
+		t.Error("expected d cookie not found in request")
+	}
+}
+
+func TestEdgeClient_Post_ErrorStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"ok":false,"error":"invalid_auth"}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	_, err := client.post(context.Background(), "client.userBoot", nil)
+	if err == nil {
+		t.Fatal("expected error for non-200 status")
+	}
+
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("expected error to contain status code 401: %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "invalid_auth") {
+		t.Errorf("expected error to contain response body: %v", err)
+	}
+
+	// Verify error message follows Go conventions (lowercase)
+	if !strings.Contains(err.Error(), "edge API error") {
+		t.Errorf("expected lowercase error message 'edge API error': %v", err)
+	}
+}
+
+func TestEdgeClient_Post_NetworkError(t *testing.T) {
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	// Use a non-existent server URL
+	client := NewEdgeClient(creds).WithBaseURL("http://localhost:0")
+
+	_, err := client.post(context.Background(), "client.userBoot", nil)
+	if err == nil {
+		t.Fatal("expected network error")
+	}
+
+	if !strings.Contains(err.Error(), "sending request") {
+		t.Errorf("expected 'sending request' error prefix: %v", err)
+	}
+}
+
+func TestEdgeClient_Post_ContextCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	_, err := client.post(ctx, "client.userBoot", nil)
+	if err == nil {
+		t.Fatal("expected context cancellation error")
+	}
+}
+
+func TestEdgeClient_Post_MultipleCookies(t *testing.T) {
+	var capturedCookies []*http.Cookie
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedCookies = r.Cookies()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+		Cookies: []*http.Cookie{
+			{Name: "d", Value: "cookie-d"},
+			{Name: "d-s", Value: "cookie-d-s"},
+			{Name: "lc", Value: "cookie-lc"},
+		},
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	_, err := client.post(context.Background(), "test.endpoint", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify all cookies were sent
+	cookieMap := make(map[string]string)
+	for _, c := range capturedCookies {
+		cookieMap[c.Name] = c.Value
+	}
+
+	expectedCookies := map[string]string{
+		"d":   "cookie-d",
+		"d-s": "cookie-d-s",
+		"lc":  "cookie-lc",
+	}
+
+	for name, expected := range expectedCookies {
+		if actual, ok := cookieMap[name]; !ok {
+			t.Errorf("cookie %q not found", name)
+		} else if actual != expected {
+			t.Errorf("cookie %q: expected %q, got %q", name, expected, actual)
+		}
+	}
+}
+
+func TestEdgeClient_Post_EmptyBody(t *testing.T) {
+	var capturedBody string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		capturedBody = string(bodyBytes)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		TeamID:    "T12345",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+
+	_, err := client.post(context.Background(), "test.endpoint", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should still contain the token even with no additional body
+	formValues, err := url.ParseQuery(capturedBody)
+	if err != nil {
+		t.Fatalf("failed to parse form body: %v", err)
+	}
+
+	if formValues.Get("token") != "xoxc-test-token" {
+		t.Errorf("expected token in form body, got: %s", capturedBody)
+	}
+}
+
+func TestFormatValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    any
+		expected string
+	}{
+		{"string", "hello", "hello"},
+		{"int", 42, "42"},
+		{"int_negative", -10, "-10"},
+		{"int64", int64(1234567890123), "1234567890123"},
+		{"float64", 3.14, "3.14"},
+		{"float64_whole", float64(10), "10"},
+		{"bool_true", true, "1"},
+		{"bool_false", false, "0"},
+		{"uint", uint(100), "100"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatValue(tt.input)
+			if result != tt.expected {
+				t.Errorf("formatValue(%v) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
 	}
 }
