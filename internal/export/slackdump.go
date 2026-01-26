@@ -1,9 +1,11 @@
 package export
 
 import (
+	"archive/zip"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -92,6 +94,83 @@ func FormatText(ctx context.Context, slackdumpPath, archiveDir string) (string, 
 	}
 
 	return zipPath, nil
+}
+
+// ExtractAndProcess extracts the zip file and organizes files into the final output structure.
+// It creates a date directory under outputDir (e.g., slack-logs/2026-01-22/) and renames
+// files from channel ID format (C123456.txt) to dated channel name format (2026-01-22-engineering.md).
+// The channelNames map provides ID to name mappings; unknown IDs fall back to the raw ID.
+func ExtractAndProcess(zipPath, outputDir, date string, channelNames map[string]string) error {
+	dateDir := filepath.Join(outputDir, date)
+	if err := os.MkdirAll(dateDir, 0750); err != nil {
+		return fmt.Errorf("creating date directory: %w", err)
+	}
+
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return fmt.Errorf("opening zip file: %w", err)
+	}
+	defer func() { _ = r.Close() }()
+
+	for _, f := range r.File {
+		if err := extractAndRenameFile(f, dateDir, date, channelNames); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// extractAndRenameFile extracts a single file from the zip and renames it appropriately.
+func extractAndRenameFile(
+	f *zip.File,
+	dateDir, date string,
+	channelNames map[string]string,
+) error {
+	// Skip directories
+	if f.FileInfo().IsDir() {
+		return nil
+	}
+
+	// Extract channel ID from filename (e.g., "C123456.txt")
+	baseName := filepath.Base(f.Name)
+	channelID := strings.TrimSuffix(baseName, ".txt")
+
+	// Get channel name for filename
+	name := channelID
+	if channelNames != nil {
+		if n, ok := channelNames[channelID]; ok && n != "" {
+			name = n
+		}
+	}
+
+	// Create output: YYYY-MM-DD-channelname.md
+	outName := fmt.Sprintf("%s-%s.md", date, name)
+	outPath := filepath.Join(dateDir, outName)
+
+	return extractFile(f, outPath)
+}
+
+// extractFile extracts a single file from a zip archive to the given destination path.
+func extractFile(f *zip.File, destPath string) error {
+	rc, err := f.Open()
+	if err != nil {
+		return fmt.Errorf("opening zip entry %s: %w", f.Name, err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	// #nosec G304 -- destPath is constructed from trusted date/channel data, not user input
+	outFile, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("creating output file %s: %w", destPath, err)
+	}
+	defer func() { _ = outFile.Close() }()
+
+	// #nosec G110 -- zip bomb protection not needed for slackdump output
+	if _, err := io.Copy(outFile, rc); err != nil {
+		return fmt.Errorf("extracting %s: %w", f.Name, err)
+	}
+
+	return nil
 }
 
 // findZipFile locates the .zip file in the given directory.
