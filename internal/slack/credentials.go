@@ -9,7 +9,9 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,9 +101,59 @@ func LoadCredentials() (*Credentials, error) {
 		return nil, fmt.Errorf("failed to decrypt credentials: %w", err)
 	}
 
-	// TODO: Parse JSON and populate Credentials struct
-	_ = plaintext // Will be used for JSON parsing
-	return nil, fmt.Errorf("credential JSON parsing not yet implemented")
+	creds, err := parseCredentials(plaintext, workspace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse credentials: %w", err)
+	}
+
+	return creds, nil
+}
+
+// slackdumpCredentials matches the JSON format saved by slackdump.
+// Uses uppercase field names to match slackdump's auth.simpleProvider serialization.
+type slackdumpCredentials struct {
+	Token  string         `json:"Token"`
+	Cookie []*http.Cookie `json:"Cookie"`
+}
+
+// parseCredentials parses decrypted JSON into Credentials struct.
+func parseCredentials(data []byte, workspace string) (*Credentials, error) {
+	var raw slackdumpCredentials
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("invalid JSON: %w", err)
+	}
+
+	if raw.Token == "" {
+		return nil, fmt.Errorf("credentials missing token")
+	}
+
+	creds := &Credentials{
+		Token:     raw.Token,
+		Cookies:   raw.Cookie,
+		Workspace: workspace,
+	}
+
+	// Extract TeamID from xoxc token format: xoxc-TEAMID-USERID-TIMESTAMP-HASH
+	creds.TeamID = extractTeamID(raw.Token)
+
+	return creds, nil
+}
+
+// extractTeamID extracts the team ID from an xoxc token.
+// Token format: xoxc-TEAMID-USERID-TIMESTAMP-HASH
+// Returns empty string if extraction fails.
+func extractTeamID(token string) string {
+	if !strings.HasPrefix(token, "xoxc-") {
+		return ""
+	}
+
+	parts := strings.Split(token, "-")
+	if len(parts) < 2 {
+		return ""
+	}
+
+	// Second part is the team ID
+	return parts[1]
 }
 
 // getCacheDir returns the path to slackdump's cache directory.
