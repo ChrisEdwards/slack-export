@@ -2,10 +2,30 @@ package export
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
 	"time"
 
 	"github.com/chrisedwards/slack-export/internal/slack"
 )
+
+// FindSlackdump locates the slackdump binary.
+// If configPath is non-empty, it validates that path exists.
+// Otherwise, it searches PATH for "slackdump".
+func FindSlackdump(configPath string) (string, error) {
+	if configPath != "" {
+		if _, err := os.Stat(configPath); err == nil {
+			return configPath, nil
+		}
+		return "", fmt.Errorf("slackdump not found at %s", configPath)
+	}
+	path, err := exec.LookPath("slackdump")
+	if err != nil {
+		return "", fmt.Errorf("slackdump not found in PATH - install from https://github.com/rusq/slackdump")
+	}
+	return path, nil
+}
 
 // SlackdumpRunner wraps the slackdump CLI for message export.
 type SlackdumpRunner struct {
