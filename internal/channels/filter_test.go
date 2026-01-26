@@ -1,6 +1,10 @@
 package channels
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/chrisedwards/slack-export/internal/slack"
+)
 
 func TestMatchAny(t *testing.T) {
 	tests := []struct {
@@ -232,4 +236,156 @@ func TestMatchPattern(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFilterChannels(t *testing.T) {
+	channels := []slack.Channel{
+		{ID: "C1", Name: "eng-backend"},
+		{ID: "C2", Name: "eng-frontend"},
+		{ID: "C3", Name: "random"},
+		{ID: "C4", Name: "_app_bot"},
+		{ID: "C5", Name: "ai-team"},
+	}
+
+	tests := []struct {
+		name     string
+		include  []string
+		exclude  []string
+		expected []string // channel IDs
+	}{
+		{
+			name:     "no filters returns all",
+			include:  nil,
+			exclude:  nil,
+			expected: []string{"C1", "C2", "C3", "C4", "C5"},
+		},
+		{
+			name:     "empty filters returns all",
+			include:  []string{},
+			exclude:  []string{},
+			expected: []string{"C1", "C2", "C3", "C4", "C5"},
+		},
+		{
+			name:     "include eng-* only",
+			include:  []string{"eng-*"},
+			exclude:  nil,
+			expected: []string{"C1", "C2"},
+		},
+		{
+			name:     "exclude _app_*",
+			include:  nil,
+			exclude:  []string{"_app_*"},
+			expected: []string{"C1", "C2", "C3", "C5"},
+		},
+		{
+			name:     "include eng-* exclude *backend*",
+			include:  []string{"eng-*"},
+			exclude:  []string{"*backend*"},
+			expected: []string{"C2"},
+		},
+		{
+			name:     "match by channel ID",
+			include:  []string{"C3"},
+			exclude:  nil,
+			expected: []string{"C3"},
+		},
+		{
+			name:     "case insensitivity - ENG-* matches eng-*",
+			include:  []string{"ENG-*"},
+			exclude:  nil,
+			expected: []string{"C1", "C2"},
+		},
+		{
+			name:     "exclude takes priority over include",
+			include:  []string{"eng-*"},
+			exclude:  []string{"eng-backend"},
+			expected: []string{"C2"},
+		},
+		{
+			name:     "include multiple patterns",
+			include:  []string{"eng-*", "ai-*"},
+			exclude:  nil,
+			expected: []string{"C1", "C2", "C5"},
+		},
+		{
+			name:     "exclude all with *",
+			include:  nil,
+			exclude:  []string{"*"},
+			expected: []string{},
+		},
+		{
+			name:     "include by ID overrides name pattern",
+			include:  []string{"eng-*", "C3"},
+			exclude:  nil,
+			expected: []string{"C1", "C2", "C3"},
+		},
+		{
+			name:     "exclude by ID",
+			include:  nil,
+			exclude:  []string{"C1", "C2"},
+			expected: []string{"C3", "C4", "C5"},
+		},
+		{
+			name:     "order preserved",
+			include:  []string{"*"},
+			exclude:  []string{"C3"},
+			expected: []string{"C1", "C2", "C4", "C5"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := FilterChannels(channels, tt.include, tt.exclude)
+			got := make([]string, len(result))
+			for i, ch := range result {
+				got[i] = ch.ID
+			}
+			if len(got) != len(tt.expected) {
+				t.Errorf("FilterChannels() returned %d channels, want %d\ngot: %v\nwant: %v",
+					len(got), len(tt.expected), got, tt.expected)
+				return
+			}
+			for i := range got {
+				if got[i] != tt.expected[i] {
+					t.Errorf("FilterChannels()[%d] = %q, want %q",
+						i, got[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
+func TestFilterApply(t *testing.T) {
+	channels := []slack.Channel{
+		{ID: "C1", Name: "eng-backend"},
+		{ID: "C2", Name: "marketing"},
+	}
+
+	t.Run("Filter.Apply matches FilterChannels", func(t *testing.T) {
+		include := []string{"eng-*"}
+		exclude := []string{}
+		filter := NewFilter(include, exclude)
+		applyResult := filter.Apply(channels)
+		filterResult := FilterChannels(channels, include, exclude)
+
+		if len(applyResult) != len(filterResult) {
+			t.Errorf("Apply returned %d, FilterChannels returned %d",
+				len(applyResult), len(filterResult))
+			return
+		}
+		for i := range applyResult {
+			if applyResult[i].ID != filterResult[i].ID {
+				t.Errorf("Result[%d]: Apply got %s, FilterChannels got %s",
+					i, applyResult[i].ID, filterResult[i].ID)
+			}
+		}
+	})
+
+	t.Run("empty channels returns empty", func(t *testing.T) {
+		filter := NewFilter([]string{"*"}, nil)
+		result := filter.Apply(nil)
+		if len(result) != 0 {
+			t.Errorf("Expected empty result for nil input, got %d", len(result))
+		}
+	})
 }
