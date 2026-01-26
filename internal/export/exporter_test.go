@@ -402,3 +402,167 @@ func TestCleanupTempDir(t *testing.T) {
 func TestCleanupTempDir_EmptyPath(t *testing.T) {
 	cleanupTempDir("")
 }
+
+func TestExportRange_InvalidTimezone(t *testing.T) {
+	e := &Exporter{
+		cfg: &config.Config{Timezone: "Invalid/Timezone"},
+	}
+
+	err := e.ExportRange(context.Background(), "2026-01-22", "2026-01-24")
+	if err == nil {
+		t.Error("ExportRange() should fail with invalid timezone")
+	}
+	if !strings.Contains(err.Error(), "loading timezone") {
+		t.Errorf("error should mention loading timezone: %v", err)
+	}
+}
+
+func TestExportRange_InvalidFromDate(t *testing.T) {
+	e := &Exporter{
+		cfg: &config.Config{Timezone: "America/New_York"},
+	}
+
+	err := e.ExportRange(context.Background(), "not-a-date", "2026-01-24")
+	if err == nil {
+		t.Error("ExportRange() should fail with invalid from date")
+	}
+	if !strings.Contains(err.Error(), "parsing from date") {
+		t.Errorf("error should mention parsing from date: %v", err)
+	}
+}
+
+func TestExportRange_InvalidToDate(t *testing.T) {
+	e := &Exporter{
+		cfg: &config.Config{Timezone: "America/New_York"},
+	}
+
+	err := e.ExportRange(context.Background(), "2026-01-22", "not-a-date")
+	if err == nil {
+		t.Error("ExportRange() should fail with invalid to date")
+	}
+	if !strings.Contains(err.Error(), "parsing to date") {
+		t.Errorf("error should mention parsing to date: %v", err)
+	}
+}
+
+func TestExportRange_FromAfterTo(t *testing.T) {
+	e := &Exporter{
+		cfg: &config.Config{Timezone: "America/New_York"},
+	}
+
+	err := e.ExportRange(context.Background(), "2026-01-24", "2026-01-22")
+	if err == nil {
+		t.Error("ExportRange() should fail when from is after to")
+	}
+	if !strings.Contains(err.Error(), "cannot be after") {
+		t.Errorf("error should mention date ordering: %v", err)
+	}
+}
+
+func TestExportRange_SingleDay(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {"id": "U123", "team_id": "T999"},
+				"team": {"id": "T999", "name": "Test"},
+				"channels": [],
+				"ims": []
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			_, _ = w.Write([]byte(`{"ok": true, "channels": []}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
+	e := &Exporter{
+		cfg:        &config.Config{Timezone: "America/New_York"},
+		edgeClient: slack.NewEdgeClient(creds).WithBaseURL(server.URL),
+	}
+
+	err := e.ExportRange(context.Background(), "2026-01-22", "2026-01-22")
+	if err != nil {
+		t.Errorf("ExportRange() should succeed with single day: %v", err)
+	}
+}
+
+func TestExportRange_MultiDay(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			callCount++
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {"id": "U123", "team_id": "T999"},
+				"team": {"id": "T999", "name": "Test"},
+				"channels": [],
+				"ims": []
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			_, _ = w.Write([]byte(`{"ok": true, "channels": []}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
+	e := &Exporter{
+		cfg:        &config.Config{Timezone: "America/New_York"},
+		edgeClient: slack.NewEdgeClient(creds).WithBaseURL(server.URL),
+	}
+
+	err := e.ExportRange(context.Background(), "2026-01-22", "2026-01-24")
+	if err != nil {
+		t.Errorf("ExportRange() should succeed: %v", err)
+	}
+
+	// userBoot is called once per ExportDate, so 3 times for 3 days
+	if callCount != 3 {
+		t.Errorf("expected 3 userBoot calls (one per day), got %d", callCount)
+	}
+}
+
+func TestExportRange_ContinuesOnError(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			callCount++
+			// Fail on second day (2026-01-23), succeed on others
+			if callCount == 2 {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"ok": false, "error": "server_error"}`))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {"id": "U123", "team_id": "T999"},
+				"team": {"id": "T999", "name": "Test"},
+				"channels": [],
+				"ims": []
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok": true, "channels": []}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
+	e := &Exporter{
+		cfg:        &config.Config{Timezone: "America/New_York"},
+		edgeClient: slack.NewEdgeClient(creds).WithBaseURL(server.URL),
+	}
+
+	err := e.ExportRange(context.Background(), "2026-01-22", "2026-01-24")
+	if err != nil {
+		t.Errorf("ExportRange() should continue on single-day errors: %v", err)
+	}
+
+	// Should have processed all 3 days despite error on day 2
+	if callCount != 3 {
+		t.Errorf("expected 3 userBoot calls (continuing past error), got %d", callCount)
+	}
+}

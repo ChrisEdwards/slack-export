@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/chrisedwards/slack-export/internal/channels"
 	"github.com/chrisedwards/slack-export/internal/config"
@@ -139,4 +140,39 @@ func cleanupTempDir(archiveDir string) {
 	if archiveDir != "" {
 		_ = os.RemoveAll(filepath.Dir(archiveDir))
 	}
+}
+
+// ExportRange exports Slack messages for all dates in a range.
+// It continues on single-day errors rather than stopping, so a transient
+// error doesn't abort a multi-day sync.
+func (e *Exporter) ExportRange(ctx context.Context, from, to string) error {
+	loc, err := time.LoadLocation(e.cfg.Timezone)
+	if err != nil {
+		return fmt.Errorf("loading timezone: %w", err)
+	}
+
+	fromDate, err := time.ParseInLocation("2006-01-02", from, loc)
+	if err != nil {
+		return fmt.Errorf("parsing from date: %w", err)
+	}
+
+	toDate, err := time.ParseInLocation("2006-01-02", to, loc)
+	if err != nil {
+		return fmt.Errorf("parsing to date: %w", err)
+	}
+
+	if fromDate.After(toDate) {
+		return fmt.Errorf("from date %s cannot be after to date %s", from, to)
+	}
+
+	for d := fromDate; !d.After(toDate); d = d.AddDate(0, 0, 1) {
+		date := d.Format("2006-01-02")
+		fmt.Printf("\n=== Exporting %s ===\n", date)
+
+		if err := e.ExportDate(ctx, date); err != nil {
+			fmt.Printf("Error exporting %s: %v\n", date, err)
+		}
+	}
+
+	return nil
 }
