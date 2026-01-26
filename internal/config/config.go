@@ -17,6 +17,13 @@ type Config struct {
 	Include       []string `yaml:"include" mapstructure:"include"`
 	Exclude       []string `yaml:"exclude" mapstructure:"exclude"`
 	SlackdumpPath string   `yaml:"slackdump_path" mapstructure:"slackdump_path"`
+
+	configFile string // path to the config file used (if any)
+}
+
+// ConfigFile returns the path to the config file used, or empty string if defaults were used.
+func (c *Config) ConfigFile() string {
+	return c.configFile
 }
 
 // Load reads configuration from YAML file and environment variables.
@@ -54,6 +61,7 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	cfg.configFile = v.ConfigFileUsed()
 	return &cfg, nil
 }
 
