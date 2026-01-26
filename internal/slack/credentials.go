@@ -10,6 +10,7 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -19,6 +20,121 @@ import (
 	"github.com/denisbrodbeck/machineid"
 	"golang.org/x/crypto/pbkdf2"
 )
+
+// CredentialError represents an error loading slackdump credentials.
+// It provides both a Go-conventional error message and a user-friendly message.
+type CredentialError struct {
+	// Code identifies the specific error type
+	Code CredentialErrorCode
+	// Message is the Go-conventional error message (lowercase, no punctuation)
+	Message string
+	// Cause is the underlying error, if any
+	Cause error
+}
+
+// CredentialErrorCode identifies specific credential error types.
+type CredentialErrorCode int
+
+const (
+	// ErrCodeCacheNotFound indicates slackdump has not been authenticated.
+	ErrCodeCacheNotFound CredentialErrorCode = iota + 1
+	// ErrCodeNoWorkspace indicates no workspace is configured.
+	ErrCodeNoWorkspace
+	// ErrCodeEmptyWorkspace indicates workspace.txt is empty.
+	ErrCodeEmptyWorkspace
+	// ErrCodeCredentialsNotFound indicates credentials file is missing.
+	ErrCodeCredentialsNotFound
+	// ErrCodeDecryptFailed indicates decryption failed.
+	ErrCodeDecryptFailed
+	// ErrCodeParseFailed indicates credentials could not be parsed.
+	ErrCodeParseFailed
+)
+
+// Error returns the Go-conventional error message.
+func (e *CredentialError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("%s: %v", e.Message, e.Cause)
+	}
+	return e.Message
+}
+
+// Unwrap returns the underlying error.
+func (e *CredentialError) Unwrap() error {
+	return e.Cause
+}
+
+// UserMessage returns a user-friendly error message with guidance.
+func (e *CredentialError) UserMessage() string {
+	switch e.Code {
+	case ErrCodeCacheNotFound:
+		return "Slackdump credentials not found.\n\n" +
+			"It looks like slackdump has not been authenticated yet.\n\n" +
+			"To authenticate, run:\n" +
+			"  slackdump auth\n\n" +
+			"More info: https://github.com/rusq/slackdump#authentication"
+
+	case ErrCodeNoWorkspace:
+		return "No workspace selected.\n\n" +
+			"The slackdump cache exists but no workspace is configured.\n\n" +
+			"To select a workspace, run:\n" +
+			"  slackdump auth\n\n" +
+			"This will authenticate and set your active workspace."
+
+	case ErrCodeEmptyWorkspace:
+		return "Workspace file is empty.\n\n" +
+			"The workspace file exists but is empty.\n\n" +
+			"To fix this, run:\n" +
+			"  slackdump auth\n\n" +
+			"This will re-authenticate and configure your workspace."
+
+	case ErrCodeCredentialsNotFound:
+		return "Credentials not found for this workspace.\n\n" +
+			"The workspace is configured but credentials are missing.\n" +
+			"This can happen if:\n" +
+			"  - You authenticated on a different machine\n" +
+			"  - The credentials file was deleted\n\n" +
+			"To fix this, run:\n" +
+			"  slackdump auth\n\n" +
+			"This will create fresh credentials for this workspace."
+
+	case ErrCodeDecryptFailed:
+		return "Failed to decrypt credentials.\n\n" +
+			"This can happen if:\n" +
+			"  - Credentials were created on a different machine\n" +
+			"  - The credential file is corrupted\n\n" +
+			"To fix this, run:\n" +
+			"  slackdump auth\n\n" +
+			"This will create fresh credentials for this machine."
+
+	case ErrCodeParseFailed:
+		return "Failed to parse credentials.\n\n" +
+			"The credentials file was decrypted but the contents are invalid.\n" +
+			"This can happen if:\n" +
+			"  - Credentials were created on a different machine\n" +
+			"  - The credential file is corrupted\n\n" +
+			"To fix this, run:\n" +
+			"  slackdump auth\n\n" +
+			"This will create fresh credentials."
+
+	default:
+		return e.Message
+	}
+}
+
+// IsCredentialError returns true if err is a CredentialError.
+func IsCredentialError(err error) bool {
+	var credErr *CredentialError
+	return errors.As(err, &credErr)
+}
+
+// GetCredentialError returns the CredentialError from err if it is one.
+func GetCredentialError(err error) *CredentialError {
+	var credErr *CredentialError
+	if errors.As(err, &credErr) {
+		return credErr
+	}
+	return nil
+}
 
 const (
 	// appID is the application identifier used by slackdump to derive encryption keys.
@@ -91,19 +207,30 @@ func LoadCredentials() (*Credentials, error) {
 	ciphertext, err := os.ReadFile(credFile) //nolint:gosec // path validated by getCacheDir
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("credentials file not found at %s - run 'slackdump auth' first", credFile)
+			return nil, &CredentialError{
+				Code:    ErrCodeCredentialsNotFound,
+				Message: fmt.Sprintf("credentials not found for workspace %q", workspace),
+			}
 		}
 		return nil, fmt.Errorf("failed to read credentials file: %w", err)
 	}
 
 	plaintext, err := decrypt(ciphertext, key)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt credentials: %w", err)
+		return nil, &CredentialError{
+			Code:    ErrCodeDecryptFailed,
+			Message: "failed to decrypt credentials",
+			Cause:   err,
+		}
 	}
 
 	creds, err := parseCredentials(plaintext, workspace)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse credentials: %w", err)
+		return nil, &CredentialError{
+			Code:    ErrCodeParseFailed,
+			Message: "failed to parse credentials",
+			Cause:   err,
+		}
 	}
 
 	return creds, nil
@@ -166,7 +293,10 @@ func getCacheDir() (string, error) {
 
 	cacheDir := filepath.Join(home, "Library", "Caches", "slackdump")
 	if _, err := os.Stat(cacheDir); os.IsNotExist(err) {
-		return "", fmt.Errorf("slackdump cache not found at %s - run 'slackdump auth' first", cacheDir)
+		return "", &CredentialError{
+			Code:    ErrCodeCacheNotFound,
+			Message: "slackdump cache not found",
+		}
 	}
 
 	return cacheDir, nil
@@ -179,14 +309,20 @@ func getWorkspace(cacheDir string) (string, error) {
 	data, err := os.ReadFile(workspaceFile) //nolint:gosec // path is validated by getCacheDir
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", fmt.Errorf("workspace.txt not found in %s - run 'slackdump auth' first", cacheDir)
+			return "", &CredentialError{
+				Code:    ErrCodeNoWorkspace,
+				Message: "no workspace selected",
+			}
 		}
 		return "", fmt.Errorf("could not read workspace.txt: %w", err)
 	}
 
 	workspace := strings.TrimSpace(string(data))
 	if workspace == "" {
-		return "", fmt.Errorf("workspace.txt is empty - run 'slackdump auth' first")
+		return "", &CredentialError{
+			Code:    ErrCodeEmptyWorkspace,
+			Message: "workspace.txt is empty",
+		}
 	}
 
 	return workspace, nil

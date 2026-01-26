@@ -5,9 +5,12 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/denisbrodbeck/machineid"
@@ -89,9 +92,17 @@ func TestGetCacheDir_NotFound(t *testing.T) {
 	if err == nil {
 		t.Error("getCacheDir() expected error for missing cache dir")
 	}
-	// Should mention running slackdump auth
-	if err != nil && !regexp.MustCompile(`slackdump auth`).MatchString(err.Error()) {
-		t.Errorf("getCacheDir() error should mention 'slackdump auth', got: %v", err)
+	// Should be a CredentialError with user message mentioning slackdump auth
+	credErr := GetCredentialError(err)
+	if credErr == nil {
+		t.Errorf("getCacheDir() should return CredentialError, got: %T", err)
+	} else {
+		if credErr.Code != ErrCodeCacheNotFound {
+			t.Errorf("getCacheDir() error code = %v, want ErrCodeCacheNotFound", credErr.Code)
+		}
+		if !regexp.MustCompile(`slackdump auth`).MatchString(credErr.UserMessage()) {
+			t.Errorf("getCacheDir() UserMessage should mention 'slackdump auth', got: %v", credErr.UserMessage())
+		}
 	}
 }
 
@@ -137,9 +148,17 @@ func TestGetWorkspace_NotFound(t *testing.T) {
 	if err == nil {
 		t.Error("getWorkspace() expected error for missing workspace.txt")
 	}
-	// Should mention running slackdump auth
-	if err != nil && !regexp.MustCompile(`slackdump auth`).MatchString(err.Error()) {
-		t.Errorf("getWorkspace() error should mention 'slackdump auth', got: %v", err)
+	// Should be a CredentialError with user message mentioning slackdump auth
+	credErr := GetCredentialError(err)
+	if credErr == nil {
+		t.Errorf("getWorkspace() should return CredentialError, got: %T", err)
+	} else {
+		if credErr.Code != ErrCodeNoWorkspace {
+			t.Errorf("getWorkspace() error code = %v, want ErrCodeNoWorkspace", credErr.Code)
+		}
+		if !regexp.MustCompile(`slackdump auth`).MatchString(credErr.UserMessage()) {
+			t.Errorf("getWorkspace() UserMessage should mention 'slackdump auth', got: %v", credErr.UserMessage())
+		}
 	}
 }
 
@@ -156,9 +175,17 @@ func TestGetWorkspace_Empty(t *testing.T) {
 	if err == nil {
 		t.Error("getWorkspace() expected error for empty workspace.txt")
 	}
-	// Should mention running slackdump auth
-	if err != nil && !regexp.MustCompile(`slackdump auth`).MatchString(err.Error()) {
-		t.Errorf("getWorkspace() error should mention 'slackdump auth', got: %v", err)
+	// Should be a CredentialError with user message mentioning slackdump auth
+	credErr := GetCredentialError(err)
+	if credErr == nil {
+		t.Errorf("getWorkspace() should return CredentialError, got: %T", err)
+	} else {
+		if credErr.Code != ErrCodeEmptyWorkspace {
+			t.Errorf("getWorkspace() error code = %v, want ErrCodeEmptyWorkspace", credErr.Code)
+		}
+		if !regexp.MustCompile(`slackdump auth`).MatchString(credErr.UserMessage()) {
+			t.Errorf("getWorkspace() UserMessage should mention 'slackdump auth', got: %v", credErr.UserMessage())
+		}
 	}
 }
 
@@ -577,5 +604,140 @@ func TestLoadCredentials_Integration(t *testing.T) {
 
 	if len(creds.Cookies) != 1 || creds.Cookies[0].Name != "d" {
 		t.Errorf("Cookies not parsed correctly: %v", creds.Cookies)
+	}
+}
+
+func TestCredentialError_Error(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *CredentialError
+		wantMsg  string
+		wantAuth bool // should UserMessage contain "slackdump auth"
+	}{
+		{
+			name: "cache not found",
+			err: &CredentialError{
+				Code:    ErrCodeCacheNotFound,
+				Message: "slackdump cache not found",
+			},
+			wantMsg:  "slackdump cache not found",
+			wantAuth: true,
+		},
+		{
+			name: "no workspace",
+			err: &CredentialError{
+				Code:    ErrCodeNoWorkspace,
+				Message: "no workspace selected",
+			},
+			wantMsg:  "no workspace selected",
+			wantAuth: true,
+		},
+		{
+			name: "empty workspace",
+			err: &CredentialError{
+				Code:    ErrCodeEmptyWorkspace,
+				Message: "workspace.txt is empty",
+			},
+			wantMsg:  "workspace.txt is empty",
+			wantAuth: true,
+		},
+		{
+			name: "credentials not found",
+			err: &CredentialError{
+				Code:    ErrCodeCredentialsNotFound,
+				Message: "credentials not found for workspace \"test\"",
+			},
+			wantMsg:  "credentials not found for workspace \"test\"",
+			wantAuth: true,
+		},
+		{
+			name: "decrypt failed with cause",
+			err: &CredentialError{
+				Code:    ErrCodeDecryptFailed,
+				Message: "failed to decrypt credentials",
+				Cause:   errors.New("cipher error"),
+			},
+			wantMsg:  "failed to decrypt credentials: cipher error",
+			wantAuth: true,
+		},
+		{
+			name: "parse failed",
+			err: &CredentialError{
+				Code:    ErrCodeParseFailed,
+				Message: "failed to parse credentials",
+			},
+			wantMsg:  "failed to parse credentials",
+			wantAuth: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.err.Error(); got != tt.wantMsg {
+				t.Errorf("Error() = %q, want %q", got, tt.wantMsg)
+			}
+
+			userMsg := tt.err.UserMessage()
+			if tt.wantAuth && !strings.Contains(userMsg, "slackdump auth") {
+				t.Errorf("UserMessage() should contain 'slackdump auth', got: %q", userMsg)
+			}
+		})
+	}
+}
+
+func TestCredentialError_Unwrap(t *testing.T) {
+	cause := errors.New("underlying error")
+	err := &CredentialError{
+		Code:    ErrCodeDecryptFailed,
+		Message: "outer error",
+		Cause:   cause,
+	}
+
+	if unwrapped := err.Unwrap(); unwrapped != cause {
+		t.Errorf("Unwrap() = %v, want %v", unwrapped, cause)
+	}
+
+	// Test errors.Is
+	if !errors.Is(err, cause) {
+		t.Error("errors.Is() should find the cause")
+	}
+}
+
+func TestIsCredentialError(t *testing.T) {
+	credErr := &CredentialError{Code: ErrCodeCacheNotFound, Message: "test"}
+
+	if !IsCredentialError(credErr) {
+		t.Error("IsCredentialError() should return true for CredentialError")
+	}
+
+	if IsCredentialError(errors.New("regular error")) {
+		t.Error("IsCredentialError() should return false for regular error")
+	}
+
+	// Test wrapped error
+	wrapped := fmt.Errorf("wrapped: %w", credErr)
+	if !IsCredentialError(wrapped) {
+		t.Error("IsCredentialError() should return true for wrapped CredentialError")
+	}
+}
+
+func TestGetCredentialError(t *testing.T) {
+	credErr := &CredentialError{Code: ErrCodeCacheNotFound, Message: "test"}
+
+	got := GetCredentialError(credErr)
+	if got != credErr {
+		t.Errorf("GetCredentialError() = %v, want %v", got, credErr)
+	}
+
+	got = GetCredentialError(errors.New("regular error"))
+	if got != nil {
+		t.Errorf("GetCredentialError() should return nil for regular error, got %v", got)
+	}
+
+	// Test wrapped error
+	wrapped := fmt.Errorf("wrapped: %w", credErr)
+	got = GetCredentialError(wrapped)
+	if got != credErr {
+		t.Errorf("GetCredentialError() should unwrap to CredentialError, got %v", got)
 	}
 }
