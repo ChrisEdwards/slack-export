@@ -1,9 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -53,4 +55,16 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// Validate checks that the configuration is valid.
+// It validates the timezone and ensures the output directory exists (creating it if needed).
+func (c *Config) Validate() error {
+	if _, err := time.LoadLocation(c.Timezone); err != nil {
+		return fmt.Errorf("invalid timezone %q: %w", c.Timezone, err)
+	}
+	if err := os.MkdirAll(c.OutputDir, 0750); err != nil {
+		return fmt.Errorf("cannot create output directory %q: %w", c.OutputDir, err)
+	}
+	return nil
 }

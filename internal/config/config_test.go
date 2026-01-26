@@ -153,3 +153,77 @@ func TestLoad_SearchPathConfig(t *testing.T) {
 		t.Errorf("OutputDir = %q, want %q", cfg.OutputDir, "/found/in/search/path")
 	}
 }
+
+func TestValidate_ValidConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{
+		OutputDir: filepath.Join(dir, "output"),
+		Timezone:  "America/New_York",
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() error = %v", err)
+	}
+
+	info, err := os.Stat(cfg.OutputDir)
+	if err != nil {
+		t.Errorf("OutputDir not created: %v", err)
+	} else if !info.IsDir() {
+		t.Error("OutputDir is not a directory")
+	}
+}
+
+func TestValidate_InvalidTimezone(t *testing.T) {
+	cfg := &Config{
+		OutputDir: t.TempDir(),
+		Timezone:  "Invalid/Timezone",
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("Validate() expected error for invalid timezone, got nil")
+	}
+}
+
+func TestValidate_CreatesOutputDir(t *testing.T) {
+	dir := t.TempDir()
+	nested := filepath.Join(dir, "a", "b", "c")
+	cfg := &Config{
+		OutputDir: nested,
+		Timezone:  "UTC",
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() error = %v", err)
+	}
+
+	info, err := os.Stat(nested)
+	if err != nil {
+		t.Errorf("Nested OutputDir not created: %v", err)
+	} else if !info.IsDir() {
+		t.Error("OutputDir is not a directory")
+	}
+}
+
+func TestValidate_CommonTimezones(t *testing.T) {
+	timezones := []string{
+		"America/New_York",
+		"America/Los_Angeles",
+		"Europe/London",
+		"Asia/Tokyo",
+		"UTC",
+		"Local",
+	}
+
+	for _, tz := range timezones {
+		t.Run(tz, func(t *testing.T) {
+			cfg := &Config{
+				OutputDir: t.TempDir(),
+				Timezone:  tz,
+			}
+			if err := cfg.Validate(); err != nil {
+				t.Errorf("Validate() error for timezone %q: %v", tz, err)
+			}
+		})
+	}
+}
