@@ -163,8 +163,8 @@ https://github.com/rusq/slackdump/issues/598
 ## Files in This Folder
 
 - `getting-my-slack-channels-with-activity.md` - This documentation
-- `active_channels.go` - The active_channels tool source
-- `test_channels.go` - Original exploration script
+- `active_channels.go.sample` - The active_channels tool source (reference only, not compiled)
+- `test_channels.go.sample` - Original exploration script (reference only, not compiled)
 
 ## Key Files in Slackdump
 
