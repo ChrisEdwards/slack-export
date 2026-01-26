@@ -143,6 +143,43 @@ func (c *EdgeClient) ClientUserBoot(ctx context.Context) (*UserBootResponse, err
 	return &resp, nil
 }
 
+// ParseSlackTS parses a Slack timestamp string into a time.Time.
+// Slack timestamps are in the format "1737676800.123456" where the integer part
+// is Unix seconds and the decimal part is microseconds.
+// Returns zero time for empty string.
+func ParseSlackTS(ts string) (time.Time, error) {
+	if ts == "" {
+		return time.Time{}, nil
+	}
+
+	parts := strings.Split(ts, ".")
+	secs, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parsing seconds: %w", err)
+	}
+
+	var nsecs int64
+	if len(parts) > 1 && parts[1] != "" {
+		// Pad to 6 digits for microseconds
+		micro := parts[1]
+		for len(micro) < 6 {
+			micro += "0"
+		}
+		// Truncate if longer than 6 digits
+		if len(micro) > 6 {
+			micro = micro[:6]
+		}
+		microVal, err := strconv.ParseInt(micro, 10, 64)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("parsing microseconds: %w", err)
+		}
+		// Convert microseconds to nanoseconds
+		nsecs = microVal * 1000
+	}
+
+	return time.Unix(secs, nsecs), nil
+}
+
 // ClientCounts calls the client.counts Edge API endpoint.
 // Returns activity timestamps showing when each channel last had a message.
 func (c *EdgeClient) ClientCounts(ctx context.Context) (*CountsResponse, error) {

@@ -748,3 +748,128 @@ func TestEdgeClient_ClientCounts_RequestFormat(t *testing.T) {
 		t.Errorf("expected include_file_channels=1, got %s", formValues.Get("include_file_channels"))
 	}
 }
+
+func TestParseSlackTS(t *testing.T) {
+	tests := []struct {
+		name        string
+		ts          string
+		wantUnix    int64
+		wantNsec    int64
+		wantZero    bool
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:     "full timestamp with microseconds",
+			ts:       "1737676800.123456",
+			wantUnix: 1737676800,
+			wantNsec: 123456000, // 123456 microseconds = 123456000 nanoseconds
+		},
+		{
+			name:     "timestamp without decimal",
+			ts:       "1737676800",
+			wantUnix: 1737676800,
+			wantNsec: 0,
+		},
+		{
+			name:     "timestamp with empty decimal",
+			ts:       "1737676800.",
+			wantUnix: 1737676800,
+			wantNsec: 0,
+		},
+		{
+			name:     "timestamp with short microseconds (padded)",
+			ts:       "1737676800.123",
+			wantUnix: 1737676800,
+			wantNsec: 123000000, // "123" padded to "123000" = 123000 microseconds = 123000000 nanoseconds
+		},
+		{
+			name:     "timestamp with single digit microseconds",
+			ts:       "1737676800.1",
+			wantUnix: 1737676800,
+			wantNsec: 100000000, // "1" padded to "100000" = 100000 microseconds
+		},
+		{
+			name:     "timestamp with long microseconds (truncated)",
+			ts:       "1737676800.123456789",
+			wantUnix: 1737676800,
+			wantNsec: 123456000, // truncated to 6 digits
+		},
+		{
+			name:     "zero timestamp",
+			ts:       "0.000000",
+			wantUnix: 0,
+			wantNsec: 0,
+		},
+		{
+			name:     "empty string returns zero time",
+			ts:       "",
+			wantZero: true,
+		},
+		{
+			name:        "invalid seconds",
+			ts:          "not_a_number.123456",
+			wantErr:     true,
+			errContains: "parsing seconds",
+		},
+		{
+			name:        "invalid microseconds",
+			ts:          "1737676800.abc",
+			wantErr:     true,
+			errContains: "parsing microseconds",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseSlackTS(tt.ts)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errContains)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.wantZero {
+				if !got.IsZero() {
+					t.Errorf("expected zero time, got %v", got)
+				}
+				return
+			}
+
+			if got.Unix() != tt.wantUnix {
+				t.Errorf("Unix() = %d, want %d", got.Unix(), tt.wantUnix)
+			}
+
+			// Check nanoseconds component
+			gotNsec := got.UnixNano() - (got.Unix() * 1e9)
+			if gotNsec != tt.wantNsec {
+				t.Errorf("nanoseconds = %d, want %d", gotNsec, tt.wantNsec)
+			}
+		})
+	}
+}
+
+func TestParseSlackTS_RoundTrip(t *testing.T) {
+	// Test that typical Slack timestamps parse correctly
+	ts := "1737676900.123456"
+	got, err := ParseSlackTS(ts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// January 24, 2025 in UTC
+	expected := time.Date(2025, 1, 24, 0, 1, 40, 123456000, time.UTC)
+
+	if !got.Equal(expected) {
+		t.Errorf("ParseSlackTS(%q) = %v, want %v", ts, got, expected)
+	}
+}
