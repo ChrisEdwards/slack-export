@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 // Config holds application configuration loaded from YAML.
@@ -27,7 +28,7 @@ func (c *Config) ConfigFile() string {
 }
 
 // Load reads configuration from YAML file and environment variables.
-// Search order: explicit path > ./slack-export.yaml > ~/.config/slack-export/
+// Search order: explicit path > ~/.config/slack-export/slack-export.yaml
 // Environment variables with SLACK_EXPORT_ prefix override file values.
 func Load(path string) (*Config, error) {
 	v := viper.New()
@@ -44,7 +45,6 @@ func Load(path string) (*Config, error) {
 	} else {
 		v.SetConfigName("slack-export")
 		v.SetConfigType("yaml")
-		v.AddConfigPath(".")
 		if home, err := os.UserHomeDir(); err == nil {
 			v.AddConfigPath(filepath.Join(home, ".config", "slack-export"))
 		}
@@ -75,4 +75,41 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("cannot create output directory %q: %w", c.OutputDir, err)
 	}
 	return nil
+}
+
+// Save writes the configuration to a YAML file.
+// If path is empty, uses the default user config location (~/.config/slack-export/slack-export.yaml).
+func (c *Config) Save(path string) error {
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("cannot determine home directory: %w", err)
+		}
+		path = filepath.Join(home, ".config", "slack-export", "slack-export.yaml")
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0750); err != nil {
+		return fmt.Errorf("cannot create config directory: %w", err)
+	}
+
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("cannot marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		return fmt.Errorf("cannot write config: %w", err)
+	}
+
+	return nil
+}
+
+// DefaultConfigPath returns the default user config path.
+func DefaultConfigPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "slack-export", "slack-export.yaml")
 }

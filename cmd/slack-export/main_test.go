@@ -312,3 +312,71 @@ func TestChannelsCmd_SinceFlag(t *testing.T) {
 		t.Error("channels command should have --since flag")
 	}
 }
+
+func TestInitCmd_Registered(t *testing.T) {
+	found := false
+	for _, cmd := range rootCmd.Commands() {
+		if cmd.Name() == "init" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("init command should be registered with root")
+	}
+}
+
+func TestInitCmd_UsageAndHelp(t *testing.T) {
+	if initCmd.Use != "init" {
+		t.Errorf("init Use = %q, want 'init'", initCmd.Use)
+	}
+
+	if initCmd.Short == "" {
+		t.Error("init command should have Short description")
+	}
+
+	if initCmd.Long == "" {
+		t.Error("init command should have Long description")
+	}
+}
+
+func TestInitCmd_ForceFlag(t *testing.T) {
+	forceFlag := initCmd.Flags().Lookup("force")
+	if forceFlag == nil {
+		t.Error("init command should have --force flag")
+	}
+}
+
+func TestDetectTimezone_TZEnvVar(t *testing.T) {
+	t.Setenv("TZ", "Europe/Paris")
+
+	tz := detectTimezone()
+	if tz != "Europe/Paris" {
+		t.Errorf("detectTimezone() = %q, want Europe/Paris when TZ is set", tz)
+	}
+}
+
+func TestDetectTimezone_InvalidTZ(t *testing.T) {
+	t.Setenv("TZ", "Invalid/NotATimezone")
+
+	// Should not return the invalid timezone
+	tz := detectTimezone()
+	if tz == "Invalid/NotATimezone" {
+		t.Error("detectTimezone() should not return invalid timezone")
+	}
+}
+
+func TestDetectTimezone_EmptyTZ(t *testing.T) {
+	t.Setenv("TZ", "")
+
+	// Should fallback to other detection methods or return empty
+	tz := detectTimezone()
+	// Either returns a valid timezone from /etc/localtime or empty string
+	if tz != "" {
+		// Verify it's a valid timezone
+		_, err := os.Stat("/etc/localtime")
+		if err != nil {
+			t.Errorf("detectTimezone() = %q but /etc/localtime doesn't exist", tz)
+		}
+	}
+}

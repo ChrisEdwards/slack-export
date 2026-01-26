@@ -124,33 +124,101 @@ func TestLoad_NonExistentExplicitPath(t *testing.T) {
 	}
 }
 
-func TestLoad_SearchPathConfig(t *testing.T) {
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error = %v", err)
-	}
-
+func TestSave_WritesConfig(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "slack-export.yaml")
 
-	content := `output_dir: "/found/in/search/path"
-`
-	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
+	cfg := &Config{
+		OutputDir: "/custom/output",
+		Timezone:  "Europe/London",
+		Include:   []string{"eng-*"},
+		Exclude:   []string{"*-archive"},
 	}
 
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir() error = %v", err)
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("Save() error = %v", err)
 	}
-	t.Cleanup(func() { os.Chdir(origDir) })
 
-	cfg, err := Load("")
+	// Read back and verify
+	loaded, err := Load(configPath)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if cfg.OutputDir != "/found/in/search/path" {
-		t.Errorf("OutputDir = %q, want %q", cfg.OutputDir, "/found/in/search/path")
+	if loaded.OutputDir != cfg.OutputDir {
+		t.Errorf("OutputDir = %q, want %q", loaded.OutputDir, cfg.OutputDir)
+	}
+	if loaded.Timezone != cfg.Timezone {
+		t.Errorf("Timezone = %q, want %q", loaded.Timezone, cfg.Timezone)
+	}
+	if len(loaded.Include) != 1 || loaded.Include[0] != "eng-*" {
+		t.Errorf("Include = %v, want [eng-*]", loaded.Include)
+	}
+	if len(loaded.Exclude) != 1 || loaded.Exclude[0] != "*-archive" {
+		t.Errorf("Exclude = %v, want [*-archive]", loaded.Exclude)
+	}
+}
+
+func TestSave_CreatesParentDir(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "nested", "dir", "slack-export.yaml")
+
+	cfg := &Config{
+		OutputDir: "/test/path",
+		Timezone:  "UTC",
+	}
+
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	// Verify file exists
+	if _, err := os.Stat(configPath); err != nil {
+		t.Errorf("Config file not created: %v", err)
+	}
+}
+
+func TestDefaultConfigPath(t *testing.T) {
+	path := DefaultConfigPath()
+
+	// Should be non-empty
+	if path == "" {
+		t.Error("DefaultConfigPath() returned empty string")
+	}
+
+	// Should end with expected filename
+	if filepath.Base(path) != "slack-export.yaml" {
+		t.Errorf("DefaultConfigPath() = %q, should end with slack-export.yaml", path)
+	}
+
+	// Should contain .config/slack-export
+	if !filepath.IsAbs(path) {
+		t.Errorf("DefaultConfigPath() = %q, should be absolute path", path)
+	}
+}
+
+func TestSave_FilePermissions(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "slack-export.yaml")
+
+	cfg := &Config{
+		OutputDir: "/test/path",
+		Timezone:  "UTC",
+	}
+
+	if err := cfg.Save(configPath); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	// Check file permissions (should be 0600)
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+
+	perm := info.Mode().Perm()
+	if perm != 0600 {
+		t.Errorf("File permissions = %o, want 0600", perm)
 	}
 }
 

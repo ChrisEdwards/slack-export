@@ -5,18 +5,22 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/chrisedwards/slack-export/internal/channels"
 	"github.com/chrisedwards/slack-export/internal/config"
 	"github.com/chrisedwards/slack-export/internal/export"
 	"github.com/chrisedwards/slack-export/internal/slack"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // Version information, injected at build time via ldflags.
@@ -85,8 +89,21 @@ Examples:
 	RunE: runChannels,
 }
 
+var initCmd = &cobra.Command{
+	Use:   "init",
+	Short: "Set up slack-export with guided wizard",
+	Long: `Interactive setup wizard for first-time configuration.
+
+Walks through:
+  - Installing slackdump (if needed)
+  - Authenticating with Slack (if needed)
+  - Creating configuration file
+  - Verifying the setup works`,
+	RunE: runInit,
+}
+
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default: ./slack-export.yaml)")
+	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default: ~/.config/slack-export/slack-export.yaml)")
 	rootCmd.AddCommand(configCmd)
 
 	exportCmd.Flags().String("from", "", "Start date (YYYY-MM-DD)")
@@ -97,6 +114,9 @@ func init() {
 
 	channelsCmd.Flags().String("since", "", "Only show channels with activity since this date (YYYY-MM-DD)")
 	rootCmd.AddCommand(channelsCmd)
+
+	initCmd.Flags().Bool("force", false, "Skip config exists warning, still shows form with current values")
+	rootCmd.AddCommand(initCmd)
 }
 
 func runConfig(_ *cobra.Command, _ []string) error {
@@ -289,6 +309,418 @@ func runChannels(cmd *cobra.Command, _ []string) error {
 		fmt.Printf("%-12s  %s\n", ch.ID, ch.Name)
 	}
 	fmt.Printf("\n%d channels\n", len(chans))
+
+	return nil
+}
+
+func runInit(_ *cobra.Command, _ []string) error {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return errors.New("init requires an interactive terminal")
+	}
+
+	// Step 1: Check for slackdump
+	if err := initStepSlackdump(); err != nil {
+		return err
+	}
+
+	// Step 2: Check authentication
+	authSkipped, workspace, err := initStepAuth()
+	if err != nil {
+		return err
+	}
+
+	// Step 3: Configuration form
+	cfg, configPath, err := initStepConfig()
+	if err != nil {
+		return err
+	}
+
+	// Step 4: Verification and summary
+	return initStepVerify(cfg, configPath, authSkipped, workspace)
+}
+
+func initStepSlackdump() error {
+	fmt.Println("Step 1/4: Checking for slackdump...")
+
+	path, err := export.FindSlackdump("")
+	if err == nil {
+		fmt.Printf("✓ Found slackdump at %s\n\n", path)
+		return nil
+	}
+
+	// slackdump not found, prompt to install
+	fmt.Println("slackdump not found")
+	fmt.Println()
+	fmt.Println("slackdump is required to export Slack data.")
+	fmt.Println()
+
+	var install bool
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Install slackdump now?").
+				Affirmative("Yes, install").
+				Negative("No, I'll install manually").
+				Value(&install),
+		),
+	)
+
+	if err := form.Run(); err != nil {
+		return fmt.Errorf("prompt failed: %w", err)
+	}
+
+	if !install {
+		fmt.Println()
+		fmt.Println("To install slackdump manually, run:")
+		fmt.Println("  go install github.com/rusq/slackdump/v3/cmd/slackdump@latest")
+		fmt.Println()
+		fmt.Println("Make sure $GOPATH/bin is in your PATH.")
+		return errors.New("slackdump required but not installed")
+	}
+
+	// Install slackdump
+	fmt.Println()
+	fmt.Println("Installing slackdump...")
+
+	cmd := exec.Command("go", "install", "github.com/rusq/slackdump/v3/cmd/slackdump@latest")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		fmt.Println()
+		fmt.Println("Installation failed. Make sure Go is installed and $GOPATH/bin is in your PATH.")
+		return fmt.Errorf("failed to install slackdump: %w", err)
+	}
+
+	// Verify installation
+	path, err = exec.LookPath("slackdump")
+	if err != nil {
+		fmt.Println()
+		fmt.Println("slackdump was installed but not found in PATH.")
+		fmt.Println("Add $GOPATH/bin to your PATH and try again.")
+		return errors.New("slackdump not in PATH after installation")
+	}
+
+	fmt.Printf("✓ Installed slackdump at %s\n\n", path)
+	return nil
+}
+
+// initStepAuth checks for valid Slack authentication.
+// Returns (authSkipped, workspace, error).
+func initStepAuth() (bool, string, error) {
+	fmt.Println("Step 2/4: Checking Slack authentication...")
+
+	creds, err := slack.LoadCredentials()
+	if err == nil {
+		if err := creds.Validate(); err == nil {
+			fmt.Printf("✓ Authenticated to workspace: %s\n\n", creds.Workspace)
+			return false, creds.Workspace, nil
+		}
+	}
+
+	// Auth not valid, prompt user
+	fmt.Println("Slack authentication required")
+	fmt.Println()
+	fmt.Println("slackdump needs to authenticate with your Slack workspace.")
+	fmt.Println("This will open a browser for you to sign in.")
+	fmt.Println()
+
+	var authenticate bool
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Authenticate now?").
+				Affirmative("Authenticate now").
+				Negative("Skip for now").
+				Value(&authenticate),
+		),
+	)
+
+	if err := form.Run(); err != nil {
+		return false, "", fmt.Errorf("prompt failed: %w", err)
+	}
+
+	if !authenticate {
+		fmt.Println()
+		fmt.Println("You can authenticate later with: slackdump auth")
+		fmt.Println()
+		return true, "", nil
+	}
+
+	// Run slackdump auth
+	fmt.Println()
+	fmt.Println("Running slackdump auth... (follow the prompts)")
+	fmt.Println()
+
+	slackdumpPath, err := export.FindSlackdump("")
+	if err != nil {
+		return false, "", fmt.Errorf("slackdump not found: %w", err)
+	}
+
+	// #nosec G204 -- slackdumpPath comes from FindSlackdump, not untrusted input
+	cmd := exec.Command(slackdumpPath, "auth")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return false, "", fmt.Errorf("slackdump auth failed: %w", err)
+	}
+
+	// Verify credentials now work
+	creds, err = slack.LoadCredentials()
+	if err != nil {
+		fmt.Println()
+		fmt.Println("Authentication completed but credentials could not be loaded.")
+		fmt.Println("Try running 'slackdump auth' manually.")
+		return false, "", fmt.Errorf("credentials not found after auth: %w", err)
+	}
+
+	if err := creds.Validate(); err != nil {
+		return false, "", fmt.Errorf("credentials invalid after auth: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("✓ Authenticated to workspace: %s\n\n", creds.Workspace)
+	return false, creds.Workspace, nil
+}
+
+// initStepConfig prompts for configuration and saves it.
+// Returns (config, configPath, error).
+func initStepConfig() (*config.Config, string, error) {
+	fmt.Println("Step 3/4: Configuring slack-export...")
+
+	configPath := config.DefaultConfigPath()
+	fmt.Printf("Config will be saved to: %s\n\n", configPath)
+
+	// Load existing config for defaults
+	existingCfg, _ := config.Load("")
+
+	// Default values
+	outputDir := "./slack-logs"
+	timezone := "America/New_York"
+
+	if existingCfg != nil {
+		if existingCfg.OutputDir != "" {
+			outputDir = existingCfg.OutputDir
+		}
+		if existingCfg.Timezone != "" {
+			timezone = existingCfg.Timezone
+		}
+	}
+
+	// Detect system timezone
+	detectedTZ := detectTimezone()
+	if detectedTZ != "" {
+		timezone = detectedTZ
+	}
+
+	// Prompt for output directory
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Output directory").
+				Description("Where to save exported Slack logs").
+				Placeholder(outputDir).
+				Value(&outputDir),
+		),
+	)
+
+	if err := form.Run(); err != nil {
+		return nil, "", fmt.Errorf("prompt failed: %w", err)
+	}
+
+	// Expand to absolute path
+	absOutputDir, err := filepath.Abs(outputDir)
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid path: %w", err)
+	}
+	outputDir = absOutputDir
+
+	// Check if directory exists
+	if _, err := os.Stat(outputDir); os.IsNotExist(err) {
+		fmt.Printf("\nDirectory doesn't exist: %s\n", outputDir)
+
+		var createDir bool
+		createForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title("Create directory now?").
+					Affirmative("Yes, create it").
+					Negative("No, I'll create it later").
+					Value(&createDir),
+			),
+		)
+
+		if err := createForm.Run(); err != nil {
+			return nil, "", fmt.Errorf("prompt failed: %w", err)
+		}
+
+		if createDir {
+			if err := os.MkdirAll(outputDir, 0750); err != nil {
+				return nil, "", fmt.Errorf("failed to create directory: %w", err)
+			}
+			fmt.Printf("✓ Created %s\n", outputDir)
+		}
+	}
+
+	// Prompt for timezone
+	var useDetectedTZ bool
+	tzForm := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title(fmt.Sprintf("Use timezone %s?", timezone)).
+				Affirmative("Yes").
+				Negative("No, choose another").
+				Value(&useDetectedTZ),
+		),
+	)
+
+	if err := tzForm.Run(); err != nil {
+		return nil, "", fmt.Errorf("prompt failed: %w", err)
+	}
+
+	if !useDetectedTZ {
+		timezones := []string{
+			"America/New_York",
+			"America/Chicago",
+			"America/Denver",
+			"America/Los_Angeles",
+			"Europe/London",
+			"Europe/Paris",
+			"Asia/Tokyo",
+			"UTC",
+		}
+
+		options := make([]huh.Option[string], len(timezones))
+		for i, tz := range timezones {
+			options[i] = huh.NewOption(tz, tz)
+		}
+
+		selectForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Select timezone").
+					Options(options...).
+					Value(&timezone),
+			),
+		)
+
+		if err := selectForm.Run(); err != nil {
+			return nil, "", fmt.Errorf("prompt failed: %w", err)
+		}
+	}
+
+	// Create and save config
+	cfg := &config.Config{
+		OutputDir: outputDir,
+		Timezone:  timezone,
+	}
+
+	if err := cfg.Save(configPath); err != nil {
+		return nil, "", fmt.Errorf("failed to save config: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Printf("✓ Config saved to %s\n\n", configPath)
+	return cfg, configPath, nil
+}
+
+// detectTimezone attempts to detect the system timezone.
+func detectTimezone() string {
+	// Try TZ environment variable first
+	if tz := os.Getenv("TZ"); tz != "" {
+		if _, err := time.LoadLocation(tz); err == nil {
+			return tz
+		}
+	}
+
+	// On Unix systems, check /etc/localtime symlink
+	if target, err := os.Readlink("/etc/localtime"); err == nil {
+		// Extract timezone from path like /usr/share/zoneinfo/America/New_York
+		if _, tz, found := strings.Cut(target, "zoneinfo/"); found {
+			if _, err := time.LoadLocation(tz); err == nil {
+				return tz
+			}
+		}
+	}
+
+	return ""
+}
+
+// initStepVerify verifies the setup and prints a summary.
+func initStepVerify(cfg *config.Config, configPath string, authSkipped bool, workspace string) error {
+	fmt.Println("Step 4/4: Verifying setup...")
+
+	// Try to verify connection if auth wasn't skipped
+	if !authSkipped {
+		creds, err := slack.LoadCredentials()
+		if err == nil {
+			if err := creds.Validate(); err == nil {
+				client := slack.NewEdgeClient(creds)
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+
+				// Get workspace info
+				boot, err := client.ClientUserBoot(ctx)
+				if err == nil {
+					creds.TeamID = boot.Self.TeamID
+					workspace = creds.Workspace
+
+					// Fetch channels
+					chans, err := client.GetActiveChannels(ctx, time.Time{})
+					if err == nil {
+						fmt.Printf("✓ Connected to workspace: %s\n", workspace)
+						fmt.Printf("✓ Found %d channels", len(chans))
+
+						// Show first 5 channel names
+						limit := min(5, len(chans))
+						if limit > 0 {
+							fmt.Printf(" (showing first %d):\n", limit)
+							for i := range limit {
+								fmt.Printf("    #%s\n", chans[i].Name)
+							}
+						} else {
+							fmt.Println()
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Print summary
+	fmt.Println()
+	fmt.Println("════════════════════════════════════════════════════════════════")
+	fmt.Println()
+
+	if authSkipped {
+		fmt.Println("Setup partially complete.")
+		fmt.Println()
+		fmt.Println("⚠ Authentication skipped - run 'slackdump auth' before exporting")
+	} else {
+		fmt.Println("Setup complete!")
+	}
+
+	fmt.Println()
+	fmt.Printf("Config saved to: %s\n", configPath)
+	fmt.Printf("Output directory: %s\n", cfg.OutputDir)
+	fmt.Printf("Timezone: %s\n", cfg.Timezone)
+	if workspace != "" {
+		fmt.Printf("Workspace: %s\n", workspace)
+	}
+
+	fmt.Println()
+	fmt.Println("To customize include/exclude patterns, edit the config file.")
+	fmt.Println()
+	fmt.Println("Try these commands:")
+	fmt.Println("  slack-export channels          List your Slack channels")
+	fmt.Println("  slack-export export 2026-01-25 Export a specific date")
+	fmt.Println("  slack-export sync              Sync recent activity")
+	fmt.Println()
+	fmt.Println("Run 'slack-export --help' to see all available commands.")
+	fmt.Println()
+	fmt.Println("════════════════════════════════════════════════════════════════")
 
 	return nil
 }
