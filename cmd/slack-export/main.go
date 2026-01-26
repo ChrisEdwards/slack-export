@@ -275,11 +275,10 @@ func runChannels(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	boot, err := client.ClientUserBoot(ctx)
-	if err != nil {
+	// AuthTest verifies credentials and sets the TeamID needed for Edge API calls
+	if _, err := client.AuthTest(ctx); err != nil {
 		return fmt.Errorf("verifying credentials: %w", err)
 	}
-	creds.TeamID = boot.Self.TeamID
 
 	var since time.Time
 	sinceStr, _ := cmd.Flags().GetString("since")
@@ -294,7 +293,12 @@ func runChannels(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	chans, err := client.GetActiveChannels(ctx, since)
+	userIndex, err := client.FetchUsers(ctx)
+	if err != nil {
+		return fmt.Errorf("fetching users: %w", err)
+	}
+
+	chans, err := client.GetActiveChannelsWithUsers(ctx, since, userIndex)
 	if err != nil {
 		return fmt.Errorf("getting channels: %w", err)
 	}
@@ -661,14 +665,15 @@ func initStepVerify(cfg *config.Config, configPath string, authSkipped bool, wor
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
 
-				// Get workspace info
-				boot, err := client.ClientUserBoot(ctx)
-				if err == nil {
-					creds.TeamID = boot.Self.TeamID
+				// AuthTest verifies credentials and sets TeamID
+				if _, err := client.AuthTest(ctx); err == nil {
 					workspace = creds.Workspace
 
+					// Fetch users for DM name resolution
+					userIndex, _ := client.FetchUsers(ctx)
+
 					// Fetch channels
-					chans, err := client.GetActiveChannels(ctx, time.Time{})
+					chans, err := client.GetActiveChannelsWithUsers(ctx, time.Time{}, userIndex)
 					if err == nil {
 						fmt.Printf("✓ Connected to workspace: %s\n", workspace)
 						fmt.Printf("✓ Found %d channels", len(chans))
