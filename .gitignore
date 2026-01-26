@@ -66,3 +66,6 @@ trace.out
 
 # Project-specific
 .abacus/
+
+# Built binary
+/slack-export

@@ -2,6 +2,7 @@ GO ?= go
 GOLANGCI_LINT ?= golangci-lint
 BINARY ?= slack-export
 PKG ?= ./cmd/slack-export
+PACKAGES ?= ./cmd/... ./internal/...
 
 # Version information
 VERSION ?= dev
@@ -27,7 +28,7 @@ build: ## Compile the slack-export CLI into ./slack-export
 
 check: ## Run all checks (quiet output)
 	@if [ -n "$$VERBOSE" ]; then \
-		$(GO) fmt ./... && $(GO) vet ./... && $(GOLANGCI_LINT) run ./...; \
+		$(GO) fmt $(PACKAGES) && $(GO) vet $(PACKAGES) && $(GOLANGCI_LINT) run $(PACKAGES); \
 	else \
 		$(MAKE) check-quiet; \
 	fi
@@ -35,9 +36,9 @@ check: ## Run all checks (quiet output)
 check-quiet:
 	@. ./hack/run_silent.sh && print_main_header "Running Checks"
 	@. ./hack/run_silent.sh && print_header "slack-export" "Static analysis"
-	@. ./hack/run_silent.sh && run_with_quiet "Format check passed" "$(GO) fmt ./..."
-	@. ./hack/run_silent.sh && run_with_quiet "Vet check passed" "$(GO) vet ./..."
-	@. ./hack/run_silent.sh && run_with_quiet "Lint check passed" "$(GOLANGCI_LINT) run ./..."
+	@. ./hack/run_silent.sh && run_with_quiet "Format check passed" "$(GO) fmt $(PACKAGES)"
+	@. ./hack/run_silent.sh && run_with_quiet "Vet check passed" "$(GO) vet $(PACKAGES)"
+	@. ./hack/run_silent.sh && run_with_quiet "Lint check passed" "$(GOLANGCI_LINT) run $(PACKAGES)"
 
 check-verbose: ## Run checks with verbose output
 	@VERBOSE=1 $(MAKE) check
@@ -46,7 +47,7 @@ check-verbose: ## Run checks with verbose output
 
 test: ## Run unit tests (quiet output)
 	@if [ -n "$$VERBOSE" ]; then \
-		$(GO) test -v ./...; \
+		$(GO) test -v $(PACKAGES); \
 	else \
 		$(MAKE) test-quiet; \
 	fi
@@ -54,7 +55,7 @@ test: ## Run unit tests (quiet output)
 test-quiet:
 	@. ./hack/run_silent.sh && print_main_header "Running Tests"
 	@. ./hack/run_silent.sh && print_header "slack-export" "Unit tests"
-	@. ./hack/run_silent.sh && run_silent_with_test_count "Unit tests passed" "$(GO) test -json ./..." "go"
+	@. ./hack/run_silent.sh && run_silent_with_test_count "Unit tests passed" "$(GO) test -json $(PACKAGES)" "go"
 
 test-verbose: ## Run unit tests with verbose output
 	@VERBOSE=1 $(MAKE) test

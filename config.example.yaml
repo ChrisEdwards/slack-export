@@ -1,0 +1,26 @@
+# slack-export configuration example
+#
+# Copy this file to config.yaml and customize for your environment.
+
+# Output directory for exported markdown files
+output_dir: ~/slack-exports
+
+# Timezone for date boundaries (IANA timezone name)
+timezone: America/Los_Angeles
+
+# Include patterns (glob syntax)
+# Channels matching ANY include pattern will be considered
+include:
+  - "*"  # Include all channels by default
+
+# Exclude patterns (glob syntax)
+# Channels matching ANY exclude pattern will be skipped
+# Exclude patterns take precedence over include patterns
+exclude:
+  - "random"
+  - "social-*"
+  - "z-archive-*"
+
+# Optional: Path to slackdump binary
+# If not specified, searches PATH
+# slackdump_path: /usr/local/bin/slackdump
