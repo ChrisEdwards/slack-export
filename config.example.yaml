@@ -1,26 +1,53 @@
-# slack-export configuration example
+# slack-export configuration
+# Copy this file to slack-export.yaml and customize for your needs.
 #
-# Copy this file to config.yaml and customize for your environment.
+# Config file search order:
+#   1. Path specified via --config flag
+#   2. ./slack-export.yaml (current directory)
+#   3. ~/.config/slack-export/slack-export.yaml
+#
+# Environment variables with SLACK_EXPORT_ prefix override file values.
+# Example: SLACK_EXPORT_OUTPUT_DIR=/path/to/logs
 
-# Output directory for exported markdown files
-output_dir: ~/slack-exports
+# Directory where exported logs are written.
+# Each channel gets a subdirectory with dated markdown files.
+# Default: ./slack-logs
+output_dir: ./slack-logs
 
-# Timezone for date boundaries (IANA timezone name)
-timezone: America/Los_Angeles
+# Timezone for date boundaries when splitting logs by day.
+# Uses IANA timezone names (e.g., "America/New_York", "Europe/London", "UTC").
+# Messages are grouped into daily files based on this timezone.
+# Default: America/New_York
+timezone: America/New_York
 
-# Include patterns (glob syntax)
-# Channels matching ANY include pattern will be considered
+# Channel include patterns (glob syntax).
+# Only channels matching at least one pattern are exported.
+# If empty, all channels are included (subject to exclude patterns).
+# Patterns are case-insensitive and support * and ? wildcards.
+#
+# Examples:
+#   - "eng-*"      # All channels starting with "eng-"
+#   - "*-team"     # All channels ending with "-team"
+#   - "project-?"  # project-a, project-b, etc.
 include:
-  - "*"  # Include all channels by default
+  # - "eng-*"
+  # - "ai-*"
+  # - "_dm_*"
 
-# Exclude patterns (glob syntax)
-# Channels matching ANY exclude pattern will be skipped
-# Exclude patterns take precedence over include patterns
+# Channel exclude patterns (glob syntax).
+# Channels matching any pattern are skipped, even if they match include patterns.
+# Useful for filtering out noisy automated channels.
+#
+# Examples:
+#   - "*-deploys"  # Skip deployment notification channels
+#   - "_app_*"     # Skip app/bot channels
+#   - "*-alerts"   # Skip alert channels
 exclude:
-  - "random"
-  - "social-*"
-  - "z-archive-*"
+  # - "*-deploys"
+  # - "_app_*"
+  # - "*-alerts"
 
-# Optional: Path to slackdump binary
-# If not specified, searches PATH
+# Path to slackdump executable (optional).
+# If not set, slack-export looks for 'slackdump' in PATH.
+# Useful if slackdump is installed in a non-standard location.
 # slackdump_path: /usr/local/bin/slackdump
