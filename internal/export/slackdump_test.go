@@ -160,3 +160,84 @@ func TestFindSlackdumpDir_NonexistentDir(t *testing.T) {
 		t.Errorf("error %q should mention 'reading temp dir'", err.Error())
 	}
 }
+
+func TestFormatText_InvalidBinary(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	archiveDir := filepath.Join(tmpDir, "slackdump_20260122_120000")
+
+	_, err := FormatText(ctx, "/nonexistent/slackdump", archiveDir)
+	if err == nil {
+		t.Fatal("FormatText() with nonexistent binary should return error")
+	}
+	if !strings.Contains(err.Error(), "slackdump format text failed") {
+		t.Errorf("error %q should mention 'slackdump format text failed'", err.Error())
+	}
+}
+
+func TestFindZipFile_Found(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	zipFile := filepath.Join(tmpDir, "slackdump_20260122_120000.zip")
+	if err := os.WriteFile(zipFile, []byte("fake zip"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := findZipFile(tmpDir)
+	if err != nil {
+		t.Fatalf("findZipFile() error = %v", err)
+	}
+	if got != zipFile {
+		t.Errorf("findZipFile() = %q, want %q", got, zipFile)
+	}
+}
+
+func TestFindZipFile_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create some other files/dirs that shouldn't match
+	os.MkdirAll(filepath.Join(tmpDir, "other_dir"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "some_file.txt"), []byte("data"), 0644)
+
+	_, err := findZipFile(tmpDir)
+	if err == nil {
+		t.Fatal("findZipFile() with no zip should return error")
+	}
+	if !strings.Contains(err.Error(), "did not create expected zip file") {
+		t.Errorf("error %q should mention expected zip file", err.Error())
+	}
+}
+
+func TestFindZipFile_EmptyDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	_, err := findZipFile(tmpDir)
+	if err == nil {
+		t.Fatal("findZipFile() with empty dir should return error")
+	}
+}
+
+func TestFindZipFile_NonexistentDir(t *testing.T) {
+	_, err := findZipFile("/nonexistent/path")
+	if err == nil {
+		t.Fatal("findZipFile() with nonexistent path should return error")
+	}
+	if !strings.Contains(err.Error(), "reading directory") {
+		t.Errorf("error %q should mention 'reading directory'", err.Error())
+	}
+}
+
+func TestFindZipFile_IgnoresDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a directory with .zip suffix (edge case)
+	zipDir := filepath.Join(tmpDir, "fake.zip")
+	if err := os.MkdirAll(zipDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := findZipFile(tmpDir)
+	if err == nil {
+		t.Fatal("findZipFile() should ignore directories with .zip suffix")
+	}
+}

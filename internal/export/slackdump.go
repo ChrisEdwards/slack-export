@@ -74,6 +74,42 @@ func Archive(
 	return archiveDir, nil
 }
 
+// FormatText runs slackdump format text to convert an archive to text files.
+// It returns the path to the created .zip file containing .txt files for each channel.
+func FormatText(ctx context.Context, slackdumpPath, archiveDir string) (string, error) {
+	// #nosec G204 -- slackdumpPath comes from user configuration, not untrusted input
+	cmd := exec.CommandContext(ctx, slackdumpPath, "format", "text", archiveDir)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("slackdump format text failed: %w\nOutput: %s", err, output)
+	}
+
+	parentDir := filepath.Dir(archiveDir)
+	zipPath, err := findZipFile(parentDir)
+	if err != nil {
+		return "", fmt.Errorf("%w\nOutput: %s", err, output)
+	}
+
+	return zipPath, nil
+}
+
+// findZipFile locates the .zip file in the given directory.
+func findZipFile(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("reading directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".zip") {
+			return filepath.Join(dir, entry.Name()), nil
+		}
+	}
+
+	return "", errors.New("slackdump did not create expected zip file")
+}
+
 // findSlackdumpDir locates the slackdump_* directory in the given parent.
 func findSlackdumpDir(parentDir string) (string, error) {
 	entries, err := os.ReadDir(parentDir)
