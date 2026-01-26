@@ -16,23 +16,29 @@ const (
 	// DefaultEdgeBaseURL is the base URL for Slack's Edge API.
 	DefaultEdgeBaseURL = "https://edgeapi.slack.com"
 
+	// DefaultSlackAPIURL is the base URL for the standard Slack API.
+	DefaultSlackAPIURL = "https://slack.com/api"
+
 	// DefaultHTTPTimeout is the default timeout for HTTP requests.
 	DefaultHTTPTimeout = 30 * time.Second
 )
 
 // EdgeClient provides access to Slack's Edge API for fast channel detection.
 type EdgeClient struct {
-	creds      *Credentials
-	httpClient *http.Client
-	baseURL    string
+	creds        *Credentials
+	httpClient   *http.Client
+	baseURL      string
+	slackAPIURL  string
+	workspaceURL string // Set by AuthTest, e.g., "https://myteam.slack.com/"
 }
 
 // NewEdgeClient creates a new Edge API client with the given credentials.
 func NewEdgeClient(creds *Credentials) *EdgeClient {
 	return &EdgeClient{
-		creds:      creds,
-		httpClient: &http.Client{Timeout: DefaultHTTPTimeout},
-		baseURL:    DefaultEdgeBaseURL,
+		creds:       creds,
+		httpClient:  &http.Client{Timeout: DefaultHTTPTimeout},
+		baseURL:     DefaultEdgeBaseURL,
+		slackAPIURL: DefaultSlackAPIURL,
 	}
 }
 
@@ -40,9 +46,35 @@ func NewEdgeClient(creds *Credentials) *EdgeClient {
 // Useful for testing with mock servers.
 func (c *EdgeClient) WithBaseURL(baseURL string) *EdgeClient {
 	return &EdgeClient{
-		creds:      c.creds,
-		httpClient: c.httpClient,
-		baseURL:    baseURL,
+		creds:        c.creds,
+		httpClient:   c.httpClient,
+		baseURL:      baseURL,
+		slackAPIURL:  c.slackAPIURL,
+		workspaceURL: c.workspaceURL,
+	}
+}
+
+// WithSlackAPIURL returns a new EdgeClient with the specified Slack API URL.
+// Useful for testing with mock servers.
+func (c *EdgeClient) WithSlackAPIURL(slackAPIURL string) *EdgeClient {
+	return &EdgeClient{
+		creds:        c.creds,
+		httpClient:   c.httpClient,
+		baseURL:      c.baseURL,
+		slackAPIURL:  slackAPIURL,
+		workspaceURL: c.workspaceURL,
+	}
+}
+
+// WithWorkspaceURL returns a new EdgeClient with the specified workspace URL.
+// Useful for testing with mock servers. The URL should end with a trailing slash.
+func (c *EdgeClient) WithWorkspaceURL(workspaceURL string) *EdgeClient {
+	return &EdgeClient{
+		creds:        c.creds,
+		httpClient:   c.httpClient,
+		baseURL:      c.baseURL,
+		slackAPIURL:  c.slackAPIURL,
+		workspaceURL: workspaceURL,
 	}
 }
 
@@ -50,17 +82,23 @@ func (c *EdgeClient) WithBaseURL(baseURL string) *EdgeClient {
 // Useful for testing with custom transports.
 func (c *EdgeClient) WithHTTPClient(client *http.Client) *EdgeClient {
 	return &EdgeClient{
-		creds:      c.creds,
-		httpClient: client,
-		baseURL:    c.baseURL,
+		creds:        c.creds,
+		httpClient:   client,
+		baseURL:      c.baseURL,
+		slackAPIURL:  c.slackAPIURL,
+		workspaceURL: c.workspaceURL,
 	}
 }
 
-// post sends an authenticated POST request to the Edge API.
-// The endpoint is appended to {baseURL}/cache/{TeamID}/{endpoint}.
+// post sends an authenticated POST request to the Slack webclient API.
+// The endpoint is appended to {workspaceURL}api/{endpoint}.
 // Token is automatically added to the form body. Cookies from credentials are set.
+// Note: AuthTest must be called first to set workspaceURL.
 func (c *EdgeClient) post(ctx context.Context, endpoint string, body map[string]any) ([]byte, error) {
-	requestURL := fmt.Sprintf("%s/cache/%s/%s", c.baseURL, c.creds.TeamID, endpoint)
+	if c.workspaceURL == "" {
+		return nil, fmt.Errorf("workspaceURL not set - call AuthTest first")
+	}
+	requestURL := fmt.Sprintf("%sapi/%s", c.workspaceURL, endpoint)
 
 	// Build form data with token
 	form := url.Values{}
@@ -118,6 +156,58 @@ func formatValue(v any) string {
 	default:
 		return fmt.Sprintf("%v", val)
 	}
+}
+
+// AuthTest calls the Slack auth.test API to verify credentials and get workspace info.
+// This must be called before using Edge API methods to obtain the TeamID.
+// On success, it sets creds.TeamID to the workspace's team ID.
+func (c *EdgeClient) AuthTest(ctx context.Context) (*AuthTestResponse, error) {
+	requestURL := fmt.Sprintf("%s/auth.test", c.slackAPIURL)
+
+	form := url.Values{}
+	form.Set("token", c.creds.Token)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	formEncoded := form.Encode()
+	req.Body = io.NopCloser(strings.NewReader(formEncoded))
+	req.ContentLength = int64(len(formEncoded))
+
+	for _, cookie := range c.creds.Cookies {
+		req.AddCookie(cookie)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("sending request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("auth.test API error %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var authResp AuthTestResponse
+	if err := json.Unmarshal(bodyBytes, &authResp); err != nil {
+		return nil, fmt.Errorf("parsing auth.test response: %w", err)
+	}
+
+	if !authResp.OK {
+		return nil, fmt.Errorf("auth.test failed: %s", authResp.Error)
+	}
+
+	c.creds.TeamID = authResp.TeamID
+	c.workspaceURL = authResp.URL
+	return &authResp, nil
 }
 
 // ClientUserBoot calls the client.userBoot Edge API endpoint.
@@ -180,6 +270,81 @@ func ParseSlackTS(ts string) (time.Time, error) {
 	return time.Unix(secs, nsecs), nil
 }
 
+// FetchUsers retrieves all users in the workspace using the Slack users.list API.
+// This uses the standard Slack API (not Edge API) with Tier 2 rate limiting.
+// Returns a UserIndex for O(1) lookups by user ID.
+func (c *EdgeClient) FetchUsers(ctx context.Context) (UserIndex, error) {
+	var allUsers []User
+	cursor := ""
+
+	for {
+		users, nextCursor, err := c.fetchUsersPage(ctx, cursor)
+		if err != nil {
+			return nil, err
+		}
+		allUsers = append(allUsers, users...)
+
+		if nextCursor == "" {
+			break
+		}
+		cursor = nextCursor
+	}
+
+	return NewUserIndex(allUsers), nil
+}
+
+// fetchUsersPage fetches a single page of users from the users.list API.
+func (c *EdgeClient) fetchUsersPage(ctx context.Context, cursor string) ([]User, string, error) {
+	requestURL := fmt.Sprintf("%s/users.list", c.slackAPIURL)
+
+	form := url.Values{}
+	form.Set("token", c.creds.Token)
+	form.Set("limit", "200")
+	if cursor != "" {
+		form.Set("cursor", cursor)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	formEncoded := form.Encode()
+	req.Body = io.NopCloser(strings.NewReader(formEncoded))
+	req.ContentLength = int64(len(formEncoded))
+
+	for _, cookie := range c.creds.Cookies {
+		req.AddCookie(cookie)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("sending request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("reading response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("users.list API error %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var usersResp UsersListResponse
+	if err := json.Unmarshal(bodyBytes, &usersResp); err != nil {
+		return nil, "", fmt.Errorf("parsing users.list response: %w", err)
+	}
+
+	if !usersResp.OK {
+		return nil, "", fmt.Errorf("users.list failed: %s", usersResp.Error)
+	}
+
+	return usersResp.Members, usersResp.ResponseMetadata.NextCursor, nil
+}
+
 // ClientCounts calls the client.counts Edge API endpoint.
 // Returns activity timestamps showing when each channel last had a message.
 func (c *EdgeClient) ClientCounts(ctx context.Context) (*CountsResponse, error) {
@@ -207,7 +372,20 @@ func (c *EdgeClient) ClientCounts(ctx context.Context) (*CountsResponse, error) 
 // GetActiveChannels returns channels with activity since the given time.
 // Combines channel metadata from userBoot with timestamps from counts.
 // If since is zero time, returns all channels.
+// DM names will show user IDs (dm_U123) since no user lookup is performed.
 func (c *EdgeClient) GetActiveChannels(ctx context.Context, since time.Time) ([]Channel, error) {
+	return c.GetActiveChannelsWithUsers(ctx, since, nil)
+}
+
+// GetActiveChannelsWithUsers returns channels with activity since the given time.
+// If userIndex is provided, DM names will show display names (dm_alice) instead of IDs.
+// Combines channel metadata from userBoot with timestamps from counts.
+// If since is zero time, returns all channels.
+func (c *EdgeClient) GetActiveChannelsWithUsers(
+	ctx context.Context,
+	since time.Time,
+	userIndex UserIndex,
+) ([]Channel, error) {
 	boot, err := c.ClientUserBoot(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("userBoot: %w", err)
@@ -248,13 +426,22 @@ func (c *EdgeClient) GetActiveChannels(ctx context.Context, since time.Time) ([]
 		}
 		active = append(active, Channel{
 			ID:          im.ID,
-			Name:        fmt.Sprintf("dm_%s", im.User),
+			Name:        resolveDMName(im.User, userIndex),
 			IsIM:        true,
 			LastMessage: latest,
 		})
 	}
 
 	return active, nil
+}
+
+// resolveDMName generates a DM channel name from a user ID.
+// If userIndex is provided, uses the display name; otherwise uses the raw ID.
+func resolveDMName(userID string, userIndex UserIndex) string {
+	if userIndex == nil {
+		return fmt.Sprintf("dm_%s", userID)
+	}
+	return fmt.Sprintf("dm_%s", userIndex.DisplayName(userID))
 }
 
 // buildTimestampLookup creates a map from channel ID to latest message time.

@@ -158,7 +158,7 @@ func TestEdgeClient_Post_Success(t *testing.T) {
 		},
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	body := map[string]any{
 		"key1": "value1",
@@ -175,8 +175,8 @@ func TestEdgeClient_Post_Success(t *testing.T) {
 		t.Errorf("unexpected response: %s", result)
 	}
 
-	// Verify URL path
-	expectedPath := "/cache/T12345/client.userBoot"
+	// Verify URL path (now uses workspace API, not edge API)
+	expectedPath := "/api/client.userBoot"
 	if capturedRequest.URL.Path != expectedPath {
 		t.Errorf("expected path %q, got %q", expectedPath, capturedRequest.URL.Path)
 	}
@@ -237,7 +237,7 @@ func TestEdgeClient_Post_ErrorStatus(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	_, err := client.post(context.Background(), "client.userBoot", nil)
 	if err == nil {
@@ -266,7 +266,7 @@ func TestEdgeClient_Post_NetworkError(t *testing.T) {
 	}
 
 	// Use a non-existent server URL
-	client := NewEdgeClient(creds).WithBaseURL("http://localhost:0")
+	client := NewEdgeClient(creds).WithWorkspaceURL("http://localhost:0/")
 
 	_, err := client.post(context.Background(), "client.userBoot", nil)
 	if err == nil {
@@ -291,7 +291,7 @@ func TestEdgeClient_Post_ContextCancellation(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -323,7 +323,7 @@ func TestEdgeClient_Post_MultipleCookies(t *testing.T) {
 		},
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	_, err := client.post(context.Background(), "test.endpoint", nil)
 	if err != nil {
@@ -368,7 +368,7 @@ func TestEdgeClient_Post_EmptyBody(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	_, err := client.post(context.Background(), "test.endpoint", nil)
 	if err != nil {
@@ -435,7 +435,7 @@ func TestEdgeClient_ClientUserBoot_Success(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	resp, err := client.ClientUserBoot(context.Background())
 	if err != nil {
@@ -484,7 +484,7 @@ func TestEdgeClient_ClientUserBoot_APIError(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	_, err := client.ClientUserBoot(context.Background())
 	if err == nil {
@@ -509,7 +509,7 @@ func TestEdgeClient_ClientUserBoot_ParseError(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	_, err := client.ClientUserBoot(context.Background())
 	if err == nil {
@@ -546,7 +546,7 @@ func TestEdgeClient_ClientCounts_Success(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	resp, err := client.ClientCounts(context.Background())
 	if err != nil {
@@ -595,7 +595,7 @@ func TestEdgeClient_ClientCounts_APIError(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	_, err := client.ClientCounts(context.Background())
 	if err == nil {
@@ -620,7 +620,7 @@ func TestEdgeClient_ClientCounts_ParseError(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	_, err := client.ClientCounts(context.Background())
 	if err == nil {
@@ -645,7 +645,7 @@ func TestEdgeClient_ClientCounts_EmptyResponse(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	resp, err := client.ClientCounts(context.Background())
 	if err != nil {
@@ -686,7 +686,7 @@ func TestEdgeClient_ClientUserBoot_RequestFormat(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	_, err := client.ClientUserBoot(context.Background())
 	if err != nil {
@@ -724,7 +724,7 @@ func TestEdgeClient_ClientCounts_RequestFormat(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	_, err := client.ClientCounts(context.Background())
 	if err != nil {
@@ -917,7 +917,7 @@ func TestEdgeClient_GetActiveChannels_Success(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	// Filter to channels active after Jan 24, 2025 00:00:00 UTC
 	since := time.Date(2025, 1, 24, 0, 0, 0, 0, time.UTC)
@@ -1029,7 +1029,7 @@ func TestEdgeClient_GetActiveChannels_ZeroSince(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	// Zero since time should return all channels
 	channels, err := client.GetActiveChannels(context.Background(), time.Time{})
@@ -1058,7 +1058,7 @@ func TestEdgeClient_GetActiveChannels_UserBootError(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	_, err := client.GetActiveChannels(context.Background(), time.Now())
 	if err == nil {
@@ -1094,7 +1094,7 @@ func TestEdgeClient_GetActiveChannels_CountsError(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	_, err := client.GetActiveChannels(context.Background(), time.Now())
 	if err == nil {
@@ -1130,7 +1130,7 @@ func TestEdgeClient_GetActiveChannels_EmptyResults(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	channels, err := client.GetActiveChannels(context.Background(), time.Now())
 	if err != nil {
@@ -1171,7 +1171,7 @@ func TestEdgeClient_GetActiveChannels_MPIMs(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	client := NewEdgeClient(creds).WithBaseURL(server.URL)
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	// Filter to recent activity
 	since := time.Date(2025, 1, 24, 0, 0, 0, 0, time.UTC)
@@ -1241,5 +1241,512 @@ func TestBuildTimestampLookup_EmptyCounts(t *testing.T) {
 
 	if len(lookup) != 0 {
 		t.Errorf("expected empty lookup, got %d entries", len(lookup))
+	}
+}
+
+func TestEdgeClient_AuthTest_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/auth.test" {
+			t.Errorf("expected path /auth.test, got %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "token=xoxc-test-token") {
+			t.Errorf("expected token in body, got %s", string(body))
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"ok": true,
+			"url": "https://test-team.slack.com/",
+			"team": "Test Team",
+			"user": "testuser",
+			"team_id": "T12345678",
+			"user_id": "U12345678"
+		}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithSlackAPIURL(server.URL)
+
+	resp, err := client.AuthTest(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !resp.OK {
+		t.Error("expected OK to be true")
+	}
+
+	if resp.TeamID != "T12345678" {
+		t.Errorf("expected TeamID T12345678, got %s", resp.TeamID)
+	}
+
+	if resp.UserID != "U12345678" {
+		t.Errorf("expected UserID U12345678, got %s", resp.UserID)
+	}
+
+	if resp.Team != "Test Team" {
+		t.Errorf("expected Team 'Test Team', got %s", resp.Team)
+	}
+
+	// Verify that creds.TeamID was set
+	if creds.TeamID != "T12345678" {
+		t.Errorf("expected creds.TeamID to be set to T12345678, got %s", creds.TeamID)
+	}
+}
+
+func TestEdgeClient_AuthTest_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`invalid_auth`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithSlackAPIURL(server.URL)
+
+	_, err := client.AuthTest(context.Background())
+	if err == nil {
+		t.Fatal("expected error for HTTP 401")
+	}
+
+	if !strings.Contains(err.Error(), "auth.test API error 401") {
+		t.Errorf("expected auth.test API error, got: %v", err)
+	}
+}
+
+func TestEdgeClient_AuthTest_SlackError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"ok": false,
+			"error": "invalid_auth"
+		}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithSlackAPIURL(server.URL)
+
+	_, err := client.AuthTest(context.Background())
+	if err == nil {
+		t.Fatal("expected error for Slack API error")
+	}
+
+	if !strings.Contains(err.Error(), "auth.test failed: invalid_auth") {
+		t.Errorf("expected auth.test failed error, got: %v", err)
+	}
+}
+
+func TestEdgeClient_AuthTest_WithCookies(t *testing.T) {
+	var receivedCookies []*http.Cookie
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedCookies = r.Cookies()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok": true, "team_id": "T123", "user_id": "U123"}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		Workspace: "test-workspace",
+		Cookies: []*http.Cookie{
+			{Name: "d", Value: "xoxd-test"},
+			{Name: "ds", Value: "12345"},
+		},
+	}
+
+	client := NewEdgeClient(creds).WithSlackAPIURL(server.URL)
+
+	_, err := client.AuthTest(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(receivedCookies) != 2 {
+		t.Errorf("expected 2 cookies, got %d", len(receivedCookies))
+	}
+
+	foundD := false
+	for _, c := range receivedCookies {
+		if c.Name == "d" && c.Value == "xoxd-test" {
+			foundD = true
+		}
+	}
+	if !foundD {
+		t.Error("expected 'd' cookie to be sent")
+	}
+}
+
+func TestEdgeClient_WithSlackAPIURL(t *testing.T) {
+	creds := &Credentials{
+		Token:  "xoxc-123-456-789",
+		TeamID: "T12345",
+	}
+
+	original := NewEdgeClient(creds)
+	customURL := "http://localhost:8080"
+
+	modified := original.WithSlackAPIURL(customURL)
+
+	if modified.slackAPIURL != customURL {
+		t.Errorf("expected slackAPIURL %q, got %q", customURL, modified.slackAPIURL)
+	}
+
+	if original.slackAPIURL != DefaultSlackAPIURL {
+		t.Errorf("original slackAPIURL was modified: got %q", original.slackAPIURL)
+	}
+
+	// Ensure other fields are preserved
+	if modified.baseURL != original.baseURL {
+		t.Errorf("expected baseURL to be preserved, got %q", modified.baseURL)
+	}
+}
+
+func TestNewUserIndex(t *testing.T) {
+	users := []User{
+		{ID: "U001", Name: "alice", RealName: "Alice Smith", Profile: UserProfile{DisplayName: "Alice"}},
+		{ID: "U002", Name: "bob", RealName: "Bob Jones", Profile: UserProfile{}},
+		{ID: "U003", Name: "carol", Profile: UserProfile{}},
+	}
+
+	idx := NewUserIndex(users)
+
+	if len(idx) != 3 {
+		t.Errorf("expected 3 users in index, got %d", len(idx))
+	}
+
+	if idx["U001"] == nil {
+		t.Error("U001 should be in index")
+	}
+
+	if idx["U001"].Name != "alice" {
+		t.Errorf("expected U001.Name=alice, got %s", idx["U001"].Name)
+	}
+}
+
+func TestUserIndex_DisplayName(t *testing.T) {
+	users := []User{
+		{ID: "U001", Name: "alice", RealName: "Alice Smith", Profile: UserProfile{DisplayName: "Alice"}},
+		{ID: "U002", Name: "bob", RealName: "Bob Jones", Profile: UserProfile{}},
+		{ID: "U003", Name: "carol", Profile: UserProfile{}},
+		{ID: "U004", Name: "", RealName: "", Profile: UserProfile{}},
+	}
+
+	idx := NewUserIndex(users)
+
+	tests := []struct {
+		name     string
+		userID   string
+		expected string
+	}{
+		{"prefers display name", "U001", "Alice"},
+		{"falls back to real name", "U002", "Bob Jones"},
+		{"falls back to username", "U003", "carol"},
+		{"unknown user in index", "U004", "<unknown>:U004"},
+		{"user not in index", "U999", "<unknown>:U999"},
+		{"empty user ID", "", "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := idx.DisplayName(tt.userID)
+			if got != tt.expected {
+				t.Errorf("DisplayName(%q) = %q, want %q", tt.userID, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestUserIndex_Empty(t *testing.T) {
+	idx := NewUserIndex(nil)
+
+	if len(idx) != 0 {
+		t.Errorf("expected empty index, got %d entries", len(idx))
+	}
+
+	got := idx.DisplayName("U123")
+	if got != "<unknown>:U123" {
+		t.Errorf("expected <unknown>:U123, got %s", got)
+	}
+}
+
+func TestEdgeClient_FetchUsers_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/users.list" {
+			t.Errorf("expected path /users.list, got %s", r.URL.Path)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"ok": true,
+			"members": [
+				{"id": "U001", "name": "alice", "real_name": "Alice Smith", "profile": {"display_name": "Alice"}},
+				{"id": "U002", "name": "bob", "real_name": "Bob Jones", "profile": {}}
+			],
+			"response_metadata": {"next_cursor": ""}
+		}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{
+		Token:     "xoxc-test-token",
+		Workspace: "test-workspace",
+	}
+
+	client := NewEdgeClient(creds).WithSlackAPIURL(server.URL)
+
+	idx, err := client.FetchUsers(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(idx) != 2 {
+		t.Fatalf("expected 2 users, got %d", len(idx))
+	}
+
+	if idx.DisplayName("U001") != "Alice" {
+		t.Errorf("expected Alice, got %s", idx.DisplayName("U001"))
+	}
+
+	if idx.DisplayName("U002") != "Bob Jones" {
+		t.Errorf("expected Bob Jones, got %s", idx.DisplayName("U002"))
+	}
+}
+
+func TestEdgeClient_FetchUsers_Pagination(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		body, _ := io.ReadAll(r.Body)
+		params, _ := url.ParseQuery(string(body))
+
+		if callCount == 1 {
+			if params.Get("cursor") != "" {
+				t.Error("first call should not have cursor")
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"members": [{"id": "U001", "name": "alice"}],
+				"response_metadata": {"next_cursor": "cursor123"}
+			}`))
+		} else {
+			if params.Get("cursor") != "cursor123" {
+				t.Errorf("expected cursor123, got %s", params.Get("cursor"))
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"members": [{"id": "U002", "name": "bob"}],
+				"response_metadata": {"next_cursor": ""}
+			}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &Credentials{Token: "xoxc-test-token"}
+	client := NewEdgeClient(creds).WithSlackAPIURL(server.URL)
+
+	idx, err := client.FetchUsers(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if callCount != 2 {
+		t.Errorf("expected 2 API calls, got %d", callCount)
+	}
+
+	if len(idx) != 2 {
+		t.Fatalf("expected 2 users, got %d", len(idx))
+	}
+}
+
+func TestEdgeClient_FetchUsers_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok": false, "error": "invalid_auth"}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{Token: "xoxc-test-token"}
+	client := NewEdgeClient(creds).WithSlackAPIURL(server.URL)
+
+	_, err := client.FetchUsers(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	if !strings.Contains(err.Error(), "invalid_auth") {
+		t.Errorf("expected invalid_auth error, got: %v", err)
+	}
+}
+
+func TestEdgeClient_FetchUsers_Empty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"ok": true,
+			"members": [],
+			"response_metadata": {"next_cursor": ""}
+		}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{Token: "xoxc-test-token"}
+	client := NewEdgeClient(creds).WithSlackAPIURL(server.URL)
+
+	idx, err := client.FetchUsers(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(idx) != 0 {
+		t.Errorf("expected empty index, got %d users", len(idx))
+	}
+}
+
+func TestEdgeClient_GetActiveChannelsWithUsers_ResolvesNames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {"id": "U123", "team_id": "T123", "name": "testuser"},
+				"team": {"id": "T123", "name": "Test Team", "domain": "test"},
+				"ims": [
+					{"id": "D001", "user": "U001", "is_im": true},
+					{"id": "D002", "user": "U002", "is_im": true},
+					{"id": "D003", "user": "U999", "is_im": true}
+				],
+				"channels": []
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"ims": [
+					{"id": "D001", "latest": "1737676900.000000"},
+					{"id": "D002", "latest": "1737676900.000000"},
+					{"id": "D003", "latest": "1737676900.000000"}
+				]
+			}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &Credentials{Token: "xoxc-test-token", Workspace: "test"}
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
+
+	userIndex := NewUserIndex([]User{
+		{ID: "U001", Name: "alice", Profile: UserProfile{DisplayName: "Alice"}},
+		{ID: "U002", Name: "bob", RealName: "Bob Jones", Profile: UserProfile{}},
+	})
+
+	channels, err := client.GetActiveChannelsWithUsers(context.Background(), time.Time{}, userIndex)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(channels) != 3 {
+		t.Fatalf("expected 3 DMs, got %d", len(channels))
+	}
+
+	nameByID := make(map[string]string)
+	for _, ch := range channels {
+		nameByID[ch.ID] = ch.Name
+	}
+
+	if nameByID["D001"] != "dm_Alice" {
+		t.Errorf("D001: expected dm_Alice, got %s", nameByID["D001"])
+	}
+
+	if nameByID["D002"] != "dm_Bob Jones" {
+		t.Errorf("D002: expected dm_Bob Jones, got %s", nameByID["D002"])
+	}
+
+	if nameByID["D003"] != "dm_<unknown>:U999" {
+		t.Errorf("D003: expected dm_<unknown>:U999, got %s", nameByID["D003"])
+	}
+}
+
+func TestEdgeClient_GetActiveChannelsWithUsers_NilIndex(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {}, "team": {},
+				"ims": [{"id": "D001", "user": "U456", "is_im": true}],
+				"channels": []
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"ims": [{"id": "D001", "latest": "1737676900.000000"}]
+			}`))
+		}
+	}))
+	defer server.Close()
+
+	creds := &Credentials{Token: "xoxc-test-token", Workspace: "test"}
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
+
+	channels, err := client.GetActiveChannelsWithUsers(context.Background(), time.Time{}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(channels) != 1 {
+		t.Fatalf("expected 1 DM, got %d", len(channels))
+	}
+
+	if channels[0].Name != "dm_U456" {
+		t.Errorf("expected dm_U456, got %s", channels[0].Name)
+	}
+}
+
+func TestResolveDMName(t *testing.T) {
+	userIndex := NewUserIndex([]User{
+		{ID: "U001", Name: "alice", Profile: UserProfile{DisplayName: "Alice"}},
+	})
+
+	tests := []struct {
+		name     string
+		userID   string
+		index    UserIndex
+		expected string
+	}{
+		{"with index and known user", "U001", userIndex, "dm_Alice"},
+		{"with index and unknown user", "U999", userIndex, "dm_<unknown>:U999"},
+		{"nil index", "U001", nil, "dm_U001"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveDMName(tt.userID, tt.index)
+			if got != tt.expected {
+				t.Errorf("resolveDMName(%q, index) = %q, want %q", tt.userID, got, tt.expected)
+			}
+		})
 	}
 }

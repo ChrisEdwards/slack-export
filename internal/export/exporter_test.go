@@ -144,7 +144,7 @@ func TestNewExporterWithOptions(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	edgeClient := slack.NewEdgeClient(creds).WithBaseURL(server.URL)
+	edgeClient := slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	// Manually construct an Exporter to test the struct
 	e := &Exporter{
@@ -209,7 +209,7 @@ func TestExporterIntegration_WithMockDependencies(t *testing.T) {
 		Workspace: "test-workspace",
 	}
 
-	edgeClient := slack.NewEdgeClient(creds).WithBaseURL(server.URL)
+	edgeClient := slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
 
 	e := &Exporter{
 		cfg:        cfg,
@@ -260,7 +260,13 @@ func TestExportDate_InvalidTimezone(t *testing.T) {
 func TestExportDate_NoActiveChannels(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+		if r.URL.Path == "/users.list" {
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"members": [],
+				"response_metadata": {"next_cursor": ""}
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
 			_, _ = w.Write([]byte(`{
 				"ok": true,
 				"self": {"id": "U123", "team_id": "T999"},
@@ -277,7 +283,7 @@ func TestExportDate_NoActiveChannels(t *testing.T) {
 	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
 	e := &Exporter{
 		cfg:        &config.Config{Timezone: "America/New_York"},
-		edgeClient: slack.NewEdgeClient(creds).WithBaseURL(server.URL),
+		edgeClient: slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/").WithSlackAPIURL(server.URL),
 	}
 
 	err := e.ExportDate(context.Background(), "2026-01-22")
@@ -289,7 +295,13 @@ func TestExportDate_NoActiveChannels(t *testing.T) {
 func TestExportDate_AllChannelsFilteredOut(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+		if r.URL.Path == "/users.list" {
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"members": [],
+				"response_metadata": {"next_cursor": ""}
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
 			_, _ = w.Write([]byte(`{
 				"ok": true,
 				"self": {"id": "U123", "team_id": "T999"},
@@ -312,7 +324,7 @@ func TestExportDate_AllChannelsFilteredOut(t *testing.T) {
 			Timezone: "America/New_York",
 			Exclude:  []string{"general"}, // Exclude all channels
 		},
-		edgeClient: slack.NewEdgeClient(creds).WithBaseURL(server.URL),
+		edgeClient: slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/").WithSlackAPIURL(server.URL),
 	}
 
 	err := e.ExportDate(context.Background(), "2026-01-22")
@@ -322,16 +334,25 @@ func TestExportDate_AllChannelsFilteredOut(t *testing.T) {
 }
 
 func TestExportDate_EdgeAPIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"ok": false, "error": "server_error"}`))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/users.list" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"members": [],
+				"response_metadata": {"next_cursor": ""}
+			}`))
+		} else {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"ok": false, "error": "server_error"}`))
+		}
 	}))
 	defer server.Close()
 
 	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
 	e := &Exporter{
 		cfg:        &config.Config{Timezone: "America/New_York"},
-		edgeClient: slack.NewEdgeClient(creds).WithBaseURL(server.URL),
+		edgeClient: slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/").WithSlackAPIURL(server.URL),
 	}
 
 	err := e.ExportDate(context.Background(), "2026-01-22")
@@ -462,7 +483,13 @@ func TestExportRange_FromAfterTo(t *testing.T) {
 func TestExportRange_SingleDay(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+		if r.URL.Path == "/users.list" {
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"members": [],
+				"response_metadata": {"next_cursor": ""}
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
 			_, _ = w.Write([]byte(`{
 				"ok": true,
 				"self": {"id": "U123", "team_id": "T999"},
@@ -479,7 +506,7 @@ func TestExportRange_SingleDay(t *testing.T) {
 	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
 	e := &Exporter{
 		cfg:        &config.Config{Timezone: "America/New_York"},
-		edgeClient: slack.NewEdgeClient(creds).WithBaseURL(server.URL),
+		edgeClient: slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/").WithSlackAPIURL(server.URL),
 	}
 
 	err := e.ExportRange(context.Background(), "2026-01-22", "2026-01-22")
@@ -492,7 +519,13 @@ func TestExportRange_MultiDay(t *testing.T) {
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+		if r.URL.Path == "/users.list" {
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"members": [],
+				"response_metadata": {"next_cursor": ""}
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
 			callCount++
 			_, _ = w.Write([]byte(`{
 				"ok": true,
@@ -510,7 +543,7 @@ func TestExportRange_MultiDay(t *testing.T) {
 	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
 	e := &Exporter{
 		cfg:        &config.Config{Timezone: "America/New_York"},
-		edgeClient: slack.NewEdgeClient(creds).WithBaseURL(server.URL),
+		edgeClient: slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/").WithSlackAPIURL(server.URL),
 	}
 
 	err := e.ExportRange(context.Background(), "2026-01-22", "2026-01-24")
@@ -527,7 +560,14 @@ func TestExportRange_MultiDay(t *testing.T) {
 func TestExportRange_ContinuesOnError(t *testing.T) {
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+		if r.URL.Path == "/users.list" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"members": [],
+				"response_metadata": {"next_cursor": ""}
+			}`))
+		} else if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
 			callCount++
 			// Fail on second day (2026-01-23), succeed on others
 			if callCount == 2 {
@@ -553,7 +593,7 @@ func TestExportRange_ContinuesOnError(t *testing.T) {
 	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
 	e := &Exporter{
 		cfg:        &config.Config{Timezone: "America/New_York"},
-		edgeClient: slack.NewEdgeClient(creds).WithBaseURL(server.URL),
+		edgeClient: slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/").WithSlackAPIURL(server.URL),
 	}
 
 	err := e.ExportRange(context.Background(), "2026-01-22", "2026-01-24")

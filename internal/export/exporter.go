@@ -42,11 +42,10 @@ func NewExporter(cfg *config.Config) (*Exporter, error) {
 
 	edgeClient := slack.NewEdgeClient(creds)
 
-	boot, err := edgeClient.ClientUserBoot(context.Background())
-	if err != nil {
+	// AuthTest verifies credentials and sets the TeamID needed for Edge API calls
+	if _, err := edgeClient.AuthTest(context.Background()); err != nil {
 		return nil, fmt.Errorf("verifying credentials: %w", err)
 	}
-	creds.TeamID = boot.Self.TeamID
 
 	return &Exporter{
 		cfg:        cfg,
@@ -85,7 +84,12 @@ func (e *Exporter) ExportDate(ctx context.Context, date string) error {
 		return fmt.Errorf("calculating date bounds: %w", err)
 	}
 
-	allChannels, err := e.edgeClient.GetActiveChannels(ctx, start)
+	userIndex, err := e.edgeClient.FetchUsers(ctx)
+	if err != nil {
+		return fmt.Errorf("fetching users: %w", err)
+	}
+
+	allChannels, err := e.edgeClient.GetActiveChannelsWithUsers(ctx, start, userIndex)
 	if err != nil {
 		return fmt.Errorf("getting active channels: %w", err)
 	}

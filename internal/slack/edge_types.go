@@ -72,3 +72,75 @@ type ChannelSnapshot struct {
 	MentionCount int    `json:"mention_count"`
 	HasUnreads   bool   `json:"has_unreads"`
 }
+
+// AuthTestResponse is the response from the Slack auth.test API endpoint.
+// Used to verify credentials and obtain workspace information including TeamID.
+type AuthTestResponse struct {
+	OK     bool   `json:"ok"`
+	Error  string `json:"error,omitempty"`
+	URL    string `json:"url"`
+	Team   string `json:"team"`
+	User   string `json:"user"`
+	TeamID string `json:"team_id"`
+	UserID string `json:"user_id"`
+}
+
+// User represents a Slack workspace user from the users.list API.
+type User struct {
+	ID       string      `json:"id"`
+	Name     string      `json:"name"`
+	RealName string      `json:"real_name"`
+	Deleted  bool        `json:"deleted"`
+	Profile  UserProfile `json:"profile"`
+}
+
+// UserProfile contains profile information for a Slack user.
+type UserProfile struct {
+	DisplayName string `json:"display_name"`
+	RealName    string `json:"real_name"`
+}
+
+// UsersListResponse is the response from the Slack users.list API.
+type UsersListResponse struct {
+	OK               bool   `json:"ok"`
+	Error            string `json:"error,omitempty"`
+	Members          []User `json:"members"`
+	ResponseMetadata struct {
+		NextCursor string `json:"next_cursor"`
+	} `json:"response_metadata"`
+}
+
+// UserIndex provides O(1) lookup of users by ID.
+type UserIndex map[string]*User
+
+// NewUserIndex builds a UserIndex from a slice of users.
+func NewUserIndex(users []User) UserIndex {
+	idx := make(UserIndex, len(users))
+	for i := range users {
+		idx[users[i].ID] = &users[i]
+	}
+	return idx
+}
+
+// DisplayName returns a human-readable name for the given user ID.
+// Priority: Profile.DisplayName > RealName > Name
+// Falls back to "<unknown>:ID" for unknown users.
+func (idx UserIndex) DisplayName(id string) string {
+	if id == "" {
+		return "unknown"
+	}
+	user, ok := idx[id]
+	if !ok {
+		return "<unknown>:" + id
+	}
+	if user.Profile.DisplayName != "" {
+		return user.Profile.DisplayName
+	}
+	if user.RealName != "" {
+		return user.RealName
+	}
+	if user.Name != "" {
+		return user.Name
+	}
+	return "<unknown>:" + id
+}
