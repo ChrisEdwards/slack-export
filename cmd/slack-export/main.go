@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"regexp"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -54,6 +56,19 @@ Examples:
 	RunE: runExport,
 }
 
+var syncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync Slack logs from last export to today",
+	Long: `Automatically detect the most recent export date and sync from there to today.
+
+The command scans the output directory for dated folders (YYYY-MM-DD pattern),
+finds the most recent date, and re-exports from that date through today.
+If no previous exports exist, it defaults to yesterday.
+
+The last export date is re-exported because it may have been incomplete.`,
+	RunE: runSync,
+}
+
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default: ./slack-export.yaml)")
 	rootCmd.AddCommand(configCmd)
@@ -61,6 +76,8 @@ func init() {
 	exportCmd.Flags().String("from", "", "Start date (YYYY-MM-DD)")
 	exportCmd.Flags().String("to", "", "End date (YYYY-MM-DD), defaults to today")
 	rootCmd.AddCommand(exportCmd)
+
+	rootCmd.AddCommand(syncCmd)
 }
 
 func runConfig(_ *cobra.Command, _ []string) error {
@@ -130,6 +147,69 @@ func runExport(cmd *cobra.Command, args []string) error {
 	}
 
 	return exporter.ExportRange(ctx, from, to)
+}
+
+func runSync(_ *cobra.Command, _ []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	loc, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		return fmt.Errorf("invalid timezone: %w", err)
+	}
+
+	lastDate, err := findLastExportDate(cfg.OutputDir)
+	if err != nil {
+		return fmt.Errorf("scanning output directory: %w", err)
+	}
+
+	if lastDate == "" {
+		lastDate = time.Now().In(loc).AddDate(0, 0, -1).Format("2006-01-02")
+		fmt.Printf("No previous exports found, starting from %s\n", lastDate)
+	} else {
+		fmt.Printf("Last export: %s\n", lastDate)
+	}
+
+	today := time.Now().In(loc).Format("2006-01-02")
+	fmt.Printf("Syncing from %s to %s\n", lastDate, today)
+
+	exporter, err := export.NewExporter(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to initialize exporter: %w", err)
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	return exporter.ExportRange(ctx, lastDate, today)
+}
+
+var datePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+func findLastExportDate(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+
+	var dates []string
+	for _, entry := range entries {
+		if entry.IsDir() && datePattern.MatchString(entry.Name()) {
+			dates = append(dates, entry.Name())
+		}
+	}
+
+	if len(dates) == 0 {
+		return "", nil
+	}
+
+	sort.Strings(dates)
+	return dates[len(dates)-1], nil
 }
 
 func main() {
