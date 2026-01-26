@@ -278,3 +278,37 @@ func TestDatePattern(t *testing.T) {
 		}
 	}
 }
+
+func TestChannelsCmd_Registered(t *testing.T) {
+	found := false
+	for _, cmd := range rootCmd.Commands() {
+		if cmd.Name() == "channels" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("channels command should be registered with root")
+	}
+}
+
+func TestChannelsCmd_UsageAndHelp(t *testing.T) {
+	if channelsCmd.Use != "channels" {
+		t.Errorf("channels Use = %q, want 'channels'", channelsCmd.Use)
+	}
+
+	if channelsCmd.Short == "" {
+		t.Error("channels command should have Short description")
+	}
+
+	if channelsCmd.Long == "" {
+		t.Error("channels command should have Long description")
+	}
+}
+
+func TestChannelsCmd_SinceFlag(t *testing.T) {
+	sinceFlag := channelsCmd.Flags().Lookup("since")
+	if sinceFlag == nil {
+		t.Error("channels command should have --since flag")
+	}
+}

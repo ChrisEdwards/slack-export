@@ -12,8 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chrisedwards/slack-export/internal/channels"
 	"github.com/chrisedwards/slack-export/internal/config"
 	"github.com/chrisedwards/slack-export/internal/export"
+	"github.com/chrisedwards/slack-export/internal/slack"
 	"github.com/spf13/cobra"
 )
 
@@ -69,6 +71,20 @@ The last export date is re-exported because it may have been incomplete.`,
 	RunE: runSync,
 }
 
+var channelsCmd = &cobra.Command{
+	Use:   "channels",
+	Short: "List active Slack channels",
+	Long: `List active Slack channels for debugging and pattern discovery.
+
+This command helps discover channel names to configure include/exclude patterns.
+Include and exclude patterns from the configuration are applied to the output.
+
+Examples:
+  slack-export channels                      # All channels
+  slack-export channels --since 2026-01-20   # Channels with recent activity`,
+	RunE: runChannels,
+}
+
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (default: ./slack-export.yaml)")
 	rootCmd.AddCommand(configCmd)
@@ -78,6 +94,9 @@ func init() {
 	rootCmd.AddCommand(exportCmd)
 
 	rootCmd.AddCommand(syncCmd)
+
+	channelsCmd.Flags().String("since", "", "Only show channels with activity since this date (YYYY-MM-DD)")
+	rootCmd.AddCommand(channelsCmd)
 }
 
 func runConfig(_ *cobra.Command, _ []string) error {
@@ -210,6 +229,68 @@ func findLastExportDate(dir string) (string, error) {
 
 	sort.Strings(dates)
 	return dates[len(dates)-1], nil
+}
+
+func runChannels(cmd *cobra.Command, _ []string) error {
+	cfg, err := config.Load(cfgFile)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	creds, err := slack.LoadCredentials()
+	if err != nil {
+		if credErr := slack.GetCredentialError(err); credErr != nil {
+			fmt.Fprintln(os.Stderr, credErr.UserMessage())
+			os.Exit(1)
+		}
+		return fmt.Errorf("failed to load credentials: %w", err)
+	}
+
+	if err := creds.Validate(); err != nil {
+		return fmt.Errorf("invalid credentials: %w", err)
+	}
+
+	client := slack.NewEdgeClient(creds)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	boot, err := client.ClientUserBoot(ctx)
+	if err != nil {
+		return fmt.Errorf("verifying credentials: %w", err)
+	}
+	creds.TeamID = boot.Self.TeamID
+
+	var since time.Time
+	sinceStr, _ := cmd.Flags().GetString("since")
+	if sinceStr != "" {
+		loc, err := time.LoadLocation(cfg.Timezone)
+		if err != nil {
+			return fmt.Errorf("invalid timezone: %w", err)
+		}
+		since, err = time.ParseInLocation("2006-01-02", sinceStr, loc)
+		if err != nil {
+			return fmt.Errorf("invalid since date: %w", err)
+		}
+	}
+
+	chans, err := client.GetActiveChannels(ctx, since)
+	if err != nil {
+		return fmt.Errorf("getting channels: %w", err)
+	}
+
+	chans = channels.FilterChannels(chans, cfg.Include, cfg.Exclude)
+
+	sort.Slice(chans, func(i, j int) bool {
+		return chans[i].Name < chans[j].Name
+	})
+
+	for _, ch := range chans {
+		fmt.Printf("%-12s  %s\n", ch.ID, ch.Name)
+	}
+	fmt.Printf("\n%d channels\n", len(chans))
+
+	return nil
 }
 
 func main() {
