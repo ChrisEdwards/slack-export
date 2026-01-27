@@ -325,6 +325,14 @@ If a DM appears as `dm_U015ANT8LLD` instead of `dm_alice`, the user couldn't be 
 
 The user cache at `~/.cache/slack-export/users.json` can be manually edited if needed.
 
+## Known Issues
+
+### Thread replies only appear on the thread's creation date
+
+Slack threads are exported on the date the thread was created, not when replies are added. If someone replies to a thread days later, that reply will not appear in the export for the reply date - it remains with the original thread's date.
+
+This is a limitation of how slackdump organizes thread data.
+
 ## Development
 
 ```bash
