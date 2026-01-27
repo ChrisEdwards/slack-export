@@ -69,3 +69,6 @@ trace.out
 
 # Built binary
 /slack-export
+
+# Default export output directory
+/slack-logs/
