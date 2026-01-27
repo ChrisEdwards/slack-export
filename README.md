@@ -80,19 +80,22 @@ Sync always re-exports the most recent date in your output directory. This ensur
 
 Run `slack-export sync` daily (or add it to a cron job) to keep your logs up to date.
 
-### Backfilling older messages
+### Backfilling history
 
-To export messages from before your first sync, use the `export` command:
+`sync` always continues from the most recent date in your output directory—it doesn't fill gaps. To backfill history, use `export` for the full date range you need:
 
 ```bash
-# Export a specific date
-slack-export export 2025-01-15
+# Export from a specific date through today
+slack-export export --from 2025-01-01
 
-# Export a date range
+# Export a specific date range
 slack-export export --from 2025-01-01 --to 2025-01-15
 ```
 
-After exporting, `sync` continues from the most recent date in your output directory. So if you export an earlier date, the next `sync` will backfill everything from that date through today.
+**Typical workflow:**
+1. Run `slack-export sync` to start exporting from today
+2. To add history, run `slack-export export --from <start-date>` to backfill from that date through today
+3. Future `sync` calls continue from the most recent date
 
 ### Configuring channels
 
