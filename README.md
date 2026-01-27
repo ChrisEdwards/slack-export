@@ -40,11 +40,11 @@ slack-export sync
 curl -fsSL https://raw.githubusercontent.com/ChrisEdwards/slack-export/main/install.sh | sh
 ```
 
-This auto-detects your platform and installs both `slack-export` and `slackdump` to `/usr/local/bin`.
+This auto-detects your platform and installs both `slack-export` and `slackdump` to `~/.local/bin`.
 
 To install to a different directory:
 ```bash
-INSTALL_DIR=~/.local/bin curl -fsSL https://raw.githubusercontent.com/ChrisEdwards/slack-export/main/install.sh | sh
+INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/ChrisEdwards/slack-export/main/install.sh | sh
 ```
 
 ### Manual Download

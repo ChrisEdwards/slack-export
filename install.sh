@@ -5,7 +5,7 @@ set -e
 # Usage: curl -fsSL https://raw.githubusercontent.com/ChrisEdwards/slack-export/main/install.sh | sh
 
 REPO="ChrisEdwards/slack-export"
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 # Detect OS
 detect_os() {
@@ -84,19 +84,28 @@ main() {
         BINARY_EXT=""
     fi
 
-    # Check if we need sudo
-    if [ -w "$INSTALL_DIR" ]; then
-        mv "slack-export${BINARY_EXT}" "${INSTALL_DIR}/"
-        mv "slackdump${BINARY_EXT}" "${INSTALL_DIR}/"
-    else
-        echo "Need sudo to install to ${INSTALL_DIR}"
-        sudo mv "slack-export${BINARY_EXT}" "${INSTALL_DIR}/"
-        sudo mv "slackdump${BINARY_EXT}" "${INSTALL_DIR}/"
-    fi
+    # Create install directory if needed
+    mkdir -p "$INSTALL_DIR"
+
+    mv "slack-export${BINARY_EXT}" "${INSTALL_DIR}/"
+    mv "slackdump${BINARY_EXT}" "${INSTALL_DIR}/"
 
     echo ""
     echo "Installation complete!"
     echo ""
+
+    # Check if INSTALL_DIR is in PATH
+    case ":$PATH:" in
+        *":$INSTALL_DIR:"*) ;;
+        *)
+            echo "Add ${INSTALL_DIR} to your PATH:"
+            echo ""
+            echo "  echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.zshrc"
+            echo "  source ~/.zshrc"
+            echo ""
+            ;;
+    esac
+
     echo "Next steps:"
     echo "  1. Authenticate with Slack:  slackdump auth"
     echo "  2. Run setup wizard:         slack-export init"
