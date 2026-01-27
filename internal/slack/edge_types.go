@@ -1,6 +1,9 @@
 package slack
 
-import "strings"
+import (
+	"context"
+	"strings"
+)
 
 // UserBootResponse is the response from the client.userBoot Edge API endpoint.
 // Contains all channels, DMs, and groups the user has access to.
@@ -170,4 +173,66 @@ func (idx UserIndex) Username(id string) string {
 		return strings.ToLower(user.Name)
 	}
 	return id
+}
+
+// UserFetcher fetches user info from an external source (e.g., Slack API).
+type UserFetcher interface {
+	FetchUserInfo(ctx context.Context, userID string) (*User, error)
+}
+
+// UserResolver provides unified user lookup across multiple sources.
+// Lookup order: UserIndex (workspace) → UserCache (disk) → UserFetcher (API).
+type UserResolver struct {
+	index   UserIndex
+	cache   *UserCache
+	fetcher UserFetcher
+}
+
+// NewUserResolver creates a resolver with the given sources.
+// Any source can be nil - lookups will skip that source.
+func NewUserResolver(index UserIndex, cache *UserCache, fetcher UserFetcher) *UserResolver {
+	return &UserResolver{
+		index:   index,
+		cache:   cache,
+		fetcher: fetcher,
+	}
+}
+
+// Username returns the username for a user ID, checking sources in order.
+// Returns the raw ID if user cannot be found and fetcher is nil.
+func (r *UserResolver) Username(ctx context.Context, id string) (string, error) {
+	if id == "" {
+		return "unknown", nil
+	}
+
+	// 1. Check workspace index
+	if r.index != nil {
+		if user, ok := r.index[id]; ok && user.Name != "" {
+			return strings.ToLower(user.Name), nil
+		}
+	}
+
+	// 2. Check disk cache
+	if r.cache != nil {
+		if user := r.cache.Get(id); user != nil && user.Name != "" {
+			return strings.ToLower(user.Name), nil
+		}
+	}
+
+	// 3. Fetch from API
+	if r.fetcher != nil {
+		user, err := r.fetcher.FetchUserInfo(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		if r.cache != nil {
+			r.cache.Set(user)
+		}
+		if user.Name != "" {
+			return strings.ToLower(user.Name), nil
+		}
+	}
+
+	// Fallback to raw ID
+	return id, nil
 }
