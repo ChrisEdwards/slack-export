@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-# slack-export installer
+# slack-export installer (works for both fresh install and upgrade)
 # Usage: curl -fsSL https://raw.githubusercontent.com/ChrisEdwards/slack-export/main/install.sh | sh
 
 REPO="ChrisEdwards/slack-export"
@@ -33,9 +33,17 @@ get_latest_version() {
         sed -E 's/.*"([^"]+)".*/\1/'
 }
 
+# Get installed version (if any)
+get_installed_version() {
+    if command -v slack-export >/dev/null 2>&1; then
+        slack-export --version 2>/dev/null | head -1 | sed 's/slack-export version //'
+    fi
+}
+
 main() {
     OS=$(detect_os)
     ARCH=$(detect_arch)
+    CURRENT_VERSION=$(get_installed_version)
 
     if [ "$OS" = "unsupported" ] || [ "$ARCH" = "unsupported" ]; then
         echo "Error: Unsupported platform: $(uname -s) $(uname -m)"
@@ -91,25 +99,32 @@ main() {
     mv "slackdump${BINARY_EXT}" "${INSTALL_DIR}/"
 
     echo ""
-    echo "Installation complete!"
-    echo ""
 
-    # Check if INSTALL_DIR is in PATH
-    case ":$PATH:" in
-        *":$INSTALL_DIR:"*) ;;
-        *)
-            echo "Add ${INSTALL_DIR} to your PATH:"
-            echo ""
-            echo "  echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.zshrc"
-            echo "  source ~/.zshrc"
-            echo ""
-            ;;
-    esac
+    if [ -n "$CURRENT_VERSION" ]; then
+        # Upgrade path
+        echo "Upgraded slack-export: ${CURRENT_VERSION} → ${VERSION}"
+    else
+        # Fresh install
+        echo "Installed slack-export ${VERSION}"
+        echo ""
 
-    echo "Next steps:"
-    echo "  1. Authenticate with Slack:  slackdump auth"
-    echo "  2. Run setup wizard:         slack-export init"
-    echo "  3. Export your messages:     slack-export sync"
+        # Check if INSTALL_DIR is in PATH
+        case ":$PATH:" in
+            *":$INSTALL_DIR:"*) ;;
+            *)
+                echo "Add ${INSTALL_DIR} to your PATH:"
+                echo ""
+                echo "  echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.zshrc"
+                echo "  source ~/.zshrc"
+                echo ""
+                ;;
+        esac
+
+        echo "Next steps:"
+        echo "  1. Authenticate with Slack:  slackdump auth"
+        echo "  2. Run setup wizard:         slack-export init"
+        echo "  3. Export your messages:     slack-export sync"
+    fi
 }
 
 main
