@@ -124,6 +124,12 @@ exclude:
 
 After editing, run `slack-export channels` again to verify your changes.
 
+### Day boundaries
+
+Exports use a 3am-to-3am day boundary instead of midnight. This keeps late-night work sessions together—if you're doing customer support until 2am, those messages stay with the previous day rather than splitting at midnight.
+
+The boundary uses your configured timezone.
+
 ## Configuration
 
 Configuration is stored at `~/.config/slack-export/slack-export.yaml`:
