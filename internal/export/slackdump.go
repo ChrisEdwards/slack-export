@@ -9,25 +9,55 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/chrisedwards/slack-export/internal/slack"
 )
 
-// FindSlackdump locates the slackdump binary.
-// If configPath is non-empty, it validates that path exists.
-// Otherwise, it searches PATH for "slackdump".
-func FindSlackdump(configPath string) (string, error) {
-	if configPath != "" {
-		if _, err := os.Stat(configPath); err == nil {
-			return configPath, nil
-		}
-		return "", fmt.Errorf("slackdump not found at %s", configPath)
+// findSlackdumpInDir looks for a slackdump binary in the given directory.
+// Returns the full path if found, error otherwise.
+func findSlackdumpInDir(dir string) (string, error) {
+	binaryName := "slackdump"
+	if runtime.GOOS == "windows" {
+		binaryName = "slackdump.exe"
 	}
+
+	bundled := filepath.Join(dir, binaryName)
+	if _, err := os.Stat(bundled); err == nil {
+		return bundled, nil
+	}
+	return "", fmt.Errorf("slackdump not found in %s", dir)
+}
+
+// testExeDir is used in tests to override os.Executable() directory.
+// Empty string means use the real executable directory.
+var testExeDir string
+
+// FindSlackdump locates the slackdump binary.
+// Priority order:
+// 1. Bundled binary next to the executable
+// 2. System PATH (fallback for development)
+func FindSlackdump() (string, error) {
+	// Try bundled binary first
+	var exeDir string
+	if testExeDir != "" {
+		exeDir = testExeDir
+	} else if exe, err := os.Executable(); err == nil {
+		exeDir = filepath.Dir(exe)
+	}
+
+	if exeDir != "" {
+		if path, err := findSlackdumpInDir(exeDir); err == nil {
+			return path, nil
+		}
+	}
+
+	// Fall back to PATH
 	path, err := exec.LookPath("slackdump")
 	if err != nil {
-		return "", fmt.Errorf("slackdump not found in PATH - install from https://github.com/rusq/slackdump")
+		return "", errors.New("slackdump not found - ensure it's installed alongside slack-export")
 	}
 	return path, nil
 }

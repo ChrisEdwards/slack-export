@@ -70,9 +70,8 @@ func TestNewExporter_SlackdumpNotFound(t *testing.T) {
 	t.Setenv("PATH", tmpDir)
 
 	cfg := &config.Config{
-		OutputDir:     tmpDir,
-		Timezone:      "America/New_York",
-		SlackdumpPath: "", // Use PATH lookup
+		OutputDir: tmpDir,
+		Timezone:  "America/New_York",
 	}
 
 	// This will fail at slackdump lookup before ever hitting credentials
@@ -86,24 +85,6 @@ func TestNewExporter_SlackdumpNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("NewExporter() should fail when credentials/slackdump unavailable")
 	}
-}
-
-func TestNewExporter_InvalidSlackdumpPath(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	cfg := &config.Config{
-		OutputDir:     tmpDir,
-		Timezone:      "America/New_York",
-		SlackdumpPath: "/nonexistent/slackdump", // Explicit bad path
-	}
-
-	_, err := NewExporter(cfg)
-	if err == nil {
-		t.Fatal("NewExporter() should fail with invalid slackdump path")
-	}
-
-	// The error will be about credentials first (since that check happens before slackdump)
-	// unless credentials exist. Without mocking, we can't test the slackdump path error directly.
 }
 
 // TestNewExporterWithOptions tests the Exporter using direct construction
@@ -133,9 +114,8 @@ func TestNewExporterWithOptions(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		OutputDir:     filepath.Join(tmpDir, "output"),
-		Timezone:      "America/New_York",
-		SlackdumpPath: fakeBin,
+		OutputDir: filepath.Join(tmpDir, "output"),
+		Timezone:  "America/New_York",
 	}
 
 	creds := &slack.Credentials{
@@ -198,9 +178,8 @@ func TestExporterIntegration_WithMockDependencies(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		OutputDir:     filepath.Join(tmpDir, "output"),
-		Timezone:      "America/New_York",
-		SlackdumpPath: fakeBin,
+		OutputDir: filepath.Join(tmpDir, "output"),
+		Timezone:  "America/New_York",
 	}
 
 	creds := &slack.Credentials{

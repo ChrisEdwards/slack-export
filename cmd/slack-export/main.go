@@ -130,11 +130,6 @@ func runConfig(_ *cobra.Command, _ []string) error {
 	fmt.Printf("  Timezone:         %s\n", cfg.Timezone)
 	fmt.Printf("  Include patterns: %s\n", formatPatterns(cfg.Include))
 	fmt.Printf("  Exclude patterns: %s\n", formatPatterns(cfg.Exclude))
-	if cfg.SlackdumpPath != "" {
-		fmt.Printf("  Slackdump path:   %s\n", cfg.SlackdumpPath)
-	} else {
-		fmt.Println("  Slackdump path:   (not set, will use PATH)")
-	}
 	fmt.Println()
 	if cfg.ConfigFile() != "" {
 		fmt.Printf("Config file: %s\n", cfg.ConfigFile())
@@ -359,7 +354,7 @@ func runInit(_ *cobra.Command, _ []string) error {
 func initStepSlackdump() error {
 	fmt.Println("Step 1/4: Checking for slackdump...")
 
-	path, err := export.FindSlackdump("")
+	path, err := export.FindSlackdump()
 	if err == nil {
 		fmt.Printf("✓ Found slackdump at %s\n\n", path)
 		return nil
@@ -469,7 +464,7 @@ func initStepAuth() (bool, string, error) {
 	fmt.Println("Running slackdump auth... (follow the prompts)")
 	fmt.Println()
 
-	slackdumpPath, err := export.FindSlackdump("")
+	slackdumpPath, err := export.FindSlackdump()
 	if err != nil {
 		return false, "", fmt.Errorf("slackdump not found: %w", err)
 	}

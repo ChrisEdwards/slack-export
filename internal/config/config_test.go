@@ -7,6 +7,9 @@ import (
 )
 
 func TestLoad_Defaults(t *testing.T) {
+	// Use a temp HOME to avoid reading the user's actual config file
+	t.Setenv("HOME", t.TempDir())
+
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
@@ -53,9 +56,6 @@ slackdump_path: "/usr/local/bin/slackdump"
 	}
 	if len(cfg.Exclude) != 1 {
 		t.Errorf("len(Exclude) = %d, want 1", len(cfg.Exclude))
-	}
-	if cfg.SlackdumpPath != "/usr/local/bin/slackdump" {
-		t.Errorf("SlackdumpPath = %q, want %q", cfg.SlackdumpPath, "/usr/local/bin/slackdump")
 	}
 }
 
@@ -317,16 +317,8 @@ func TestConfigFile_ReturnsUsedPath(t *testing.T) {
 }
 
 func TestConfigFile_EmptyWhenDefaultsUsed(t *testing.T) {
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error = %v", err)
-	}
-
-	dir := t.TempDir()
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("Chdir() error = %v", err)
-	}
-	t.Cleanup(func() { os.Chdir(origDir) })
+	// Use a temp HOME to avoid reading the user's actual config file
+	t.Setenv("HOME", t.TempDir())
 
 	cfg, err := Load("")
 	if err != nil {

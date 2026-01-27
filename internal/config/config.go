@@ -13,11 +13,10 @@ import (
 
 // Config holds application configuration loaded from YAML.
 type Config struct {
-	OutputDir     string   `yaml:"output_dir" mapstructure:"output_dir"`
-	Timezone      string   `yaml:"timezone" mapstructure:"timezone"`
-	Include       []string `yaml:"include" mapstructure:"include"`
-	Exclude       []string `yaml:"exclude" mapstructure:"exclude"`
-	SlackdumpPath string   `yaml:"slackdump_path" mapstructure:"slackdump_path"`
+	OutputDir string   `yaml:"output_dir" mapstructure:"output_dir"`
+	Timezone  string   `yaml:"timezone" mapstructure:"timezone"`
+	Include   []string `yaml:"include" mapstructure:"include"`
+	Exclude   []string `yaml:"exclude" mapstructure:"exclude"`
 
 	configFile string // path to the config file used (if any)
 }

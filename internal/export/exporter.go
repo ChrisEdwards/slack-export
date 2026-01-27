@@ -35,7 +35,7 @@ func NewExporter(cfg *config.Config) (*Exporter, error) {
 		return nil, fmt.Errorf("invalid credentials: %w", err)
 	}
 
-	sdPath, err := FindSlackdump(cfg.SlackdumpPath)
+	sdPath, err := FindSlackdump()
 	if err != nil {
 		return nil, err
 	}
