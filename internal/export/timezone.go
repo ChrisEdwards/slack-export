@@ -6,9 +6,9 @@ import (
 )
 
 // GetDateBounds calculates the UTC start and end times for a given date in the specified timezone.
-// The start time is midnight (00:00:00) in the target timezone converted to UTC.
-// The end time is the last nanosecond of the day (23:59:59.999999999) in the target timezone converted to UTC.
-// This correctly handles DST transitions by constructing the end time explicitly in local time.
+// Uses a "work day" definition: 3am on the date to 2:59:59am on the next day.
+// This matches typical work patterns where late-night activity belongs to the previous day.
+// This correctly handles DST transitions by constructing times explicitly in local time.
 func GetDateBounds(date, timezone string) (start, end time.Time, err error) {
 	loc, err := time.LoadLocation(timezone)
 	if err != nil {
@@ -20,11 +20,13 @@ func GetDateBounds(date, timezone string) (start, end time.Time, err error) {
 		return time.Time{}, time.Time{}, fmt.Errorf("invalid date: %w", err)
 	}
 
-	start = t.UTC()
+	// Start at 3am on the export date
+	startLocal := time.Date(t.Year(), t.Month(), t.Day(), 3, 0, 0, 0, loc)
+	start = startLocal.UTC()
 
-	// Construct end of day explicitly in local time to handle DST transitions correctly.
-	// Using time.Date ensures we get 23:59:59.999999999 in local time regardless of DST shifts.
-	endLocal := time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 999999999, loc)
+	// End at 2:59:59am on the next day
+	nextDay := t.AddDate(0, 0, 1)
+	endLocal := time.Date(nextDay.Year(), nextDay.Month(), nextDay.Day(), 2, 59, 59, 0, loc)
 	end = endLocal.UTC()
 
 	return start, end, nil
