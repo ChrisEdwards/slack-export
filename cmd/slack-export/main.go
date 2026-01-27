@@ -298,9 +298,22 @@ func runChannels(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("fetching users: %w", err)
 	}
 
-	chans, err := client.GetActiveChannelsWithUsers(ctx, since, userIndex)
+	// Set up external user cache for Slack Connect users
+	cache := slack.NewUserCache(slack.DefaultCachePath())
+	if err := cache.Load(); err != nil {
+		return fmt.Errorf("loading user cache: %w", err)
+	}
+
+	resolver := slack.NewUserResolver(userIndex, cache, client)
+
+	chans, err := client.GetActiveChannelsWithResolver(ctx, since, resolver)
 	if err != nil {
 		return fmt.Errorf("getting channels: %w", err)
+	}
+
+	// Save cache after successful fetch (may have new external users)
+	if err := cache.Save(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to save user cache: %v\n", err)
 	}
 
 	chans = channels.FilterChannels(chans, cfg.Include, cfg.Exclude)
