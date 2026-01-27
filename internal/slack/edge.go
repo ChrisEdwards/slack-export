@@ -346,6 +346,47 @@ func (c *EdgeClient) fetchUsersPage(ctx context.Context, cursor string) ([]User,
 	return usersResp.Members, usersResp.ResponseMetadata.NextCursor, nil
 }
 
+// FetchUserInfo fetches a single user's info via the Slack users.info API.
+// This is used for external Slack Connect users not in the workspace user list.
+func (c *EdgeClient) FetchUserInfo(ctx context.Context, userID string) (*User, error) {
+	requestURL := fmt.Sprintf("%s/users.info", c.slackAPIURL)
+
+	form := url.Values{}
+	form.Set("token", c.creds.Token)
+	form.Set("user", userID)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for _, cookie := range c.creds.Cookies {
+		req.AddCookie(cookie)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("users.info request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("users.info: HTTP %d", resp.StatusCode)
+	}
+
+	var result UserInfoResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding users.info response: %w", err)
+	}
+
+	if !result.OK {
+		return nil, fmt.Errorf("users.info: %s", result.Error)
+	}
+
+	return &result.User, nil
+}
+
 // ClientCounts calls the client.counts Edge API endpoint.
 // Returns activity timestamps showing when each channel last had a message.
 func (c *EdgeClient) ClientCounts(ctx context.Context) (*CountsResponse, error) {

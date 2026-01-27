@@ -1780,3 +1780,69 @@ func TestResolveDMName(t *testing.T) {
 		})
 	}
 }
+
+func TestEdgeClient_FetchUserInfo_Success(t *testing.T) {
+	var capturedBody string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
+		capturedBody = string(bodyBytes)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"ok": true,
+			"user": {
+				"id": "U03A0EQBAS3",
+				"name": "external.user",
+				"real_name": "External User",
+				"deleted": false,
+				"profile": {
+					"display_name": "External",
+					"real_name": "External User"
+				}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{Token: "xoxc-test-token"}
+	client := NewEdgeClient(creds).WithSlackAPIURL(server.URL)
+
+	user, err := client.FetchUserInfo(context.Background(), "U03A0EQBAS3")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if user.ID != "U03A0EQBAS3" {
+		t.Errorf("expected ID U03A0EQBAS3, got %s", user.ID)
+	}
+	if user.Name != "external.user" {
+		t.Errorf("expected name external.user, got %s", user.Name)
+	}
+
+	// Verify request format
+	if !strings.Contains(capturedBody, "user=U03A0EQBAS3") {
+		t.Errorf("expected user ID in request body, got: %s", capturedBody)
+	}
+	if !strings.Contains(capturedBody, "token=xoxc-test-token") {
+		t.Errorf("expected token in request body, got: %s", capturedBody)
+	}
+}
+
+func TestEdgeClient_FetchUserInfo_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok": false, "error": "user_not_found"}`))
+	}))
+	defer server.Close()
+
+	creds := &Credentials{Token: "xoxc-test-token"}
+	client := NewEdgeClient(creds).WithSlackAPIURL(server.URL)
+
+	_, err := client.FetchUserInfo(context.Background(), "U_INVALID")
+	if err == nil {
+		t.Fatal("expected error for API error response")
+	}
+	if !strings.Contains(err.Error(), "user_not_found") {
+		t.Errorf("expected user_not_found in error, got: %v", err)
+	}
+}
