@@ -9,6 +9,24 @@ A CLI tool that exports Slack channel logs to dated markdown files. It uses the 
 - **Timezone-aware** date boundaries for accurate daily exports
 - **Automatic sync** from last export date to today
 - **Clean markdown output** organized by date and channel
+- **Human-readable DM names** (e.g., `dm_alice` instead of `dm_U015ANT8LLD`)
+- **Slack Connect support** with automatic external user resolution and caching
+
+## Quick Start
+
+```bash
+# Install
+go install github.com/chrisedwards/slack-export/cmd/slack-export@latest
+
+# Run guided setup
+slack-export init
+
+# List your channels
+slack-export channels
+
+# Export today's messages
+slack-export sync
+```
 
 ## Prerequisites
 
@@ -38,9 +56,25 @@ This creates a `slack-export` binary in the current directory.
 go install github.com/chrisedwards/slack-export/cmd/slack-export@latest
 ```
 
+## Getting Started
+
+The easiest way to get started is with the interactive setup wizard:
+
+```bash
+slack-export init
+```
+
+This walks you through:
+1. **Installing slackdump** - offers to install if not found
+2. **Authenticating with Slack** - runs `slackdump auth` if needed
+3. **Configuring output directory and timezone** - with sensible defaults
+4. **Verifying the setup** - connects to Slack and shows sample channels
+
+You can re-run `slack-export init --force` to reconfigure at any time.
+
 ## Configuration
 
-Create a `slack-export.yaml` file in the current directory or `~/.config/slack-export/`:
+Configuration is stored at `~/.config/slack-export/slack-export.yaml`:
 
 ```yaml
 # Output directory for exported logs (default: ./slack-logs)
@@ -57,6 +91,7 @@ include:
 
 # Channel name patterns to exclude (glob syntax)
 exclude:
+  - "*alarms"
   - "*-alerts"
   - "*-notifications"
   - "bot-*"
@@ -86,17 +121,39 @@ SLACK_EXPORT_TIMEZONE=UTC
 
 ### Pattern Matching
 
-Patterns use glob syntax:
-- `*` matches any sequence of characters
-- `?` matches a single character
-- Matching is case-insensitive
+Patterns use glob syntax and match against both channel **names** and **IDs**:
+
+| Pattern | Matches |
+|---------|---------|
+| `*` | Any sequence of characters |
+| `?` | Any single character |
+
+Matching is **case-insensitive**.
+
+**Examples:**
+
+| Pattern | Matches | Doesn't Match |
+|---------|---------|---------------|
+| `*alarms` | `prod-alarms`, `devalarms`, `ALARMS` | `alarms-oncall` |
+| `*-alerts` | `prod-alerts`, `staging-alerts` | `alerts`, `alertsbot` |
+| `bot-*` | `bot-deploy`, `bot-notifications` | `mybot-test` |
+| `team-?` | `team-a`, `team-b` | `team-ab`, `team` |
+| `CFAU264UU` | Channel with ID `CFAU264UU` | Other channels |
 
 **Filter logic:**
-1. If a channel matches ANY exclude pattern, it is skipped
+1. If a channel matches ANY exclude pattern (by name or ID), it is skipped
 2. If include list is empty, all non-excluded channels are included
 3. If include list is non-empty, only channels matching an include pattern are included
 
 ## Usage
+
+### Interactive Setup
+
+```bash
+slack-export init
+```
+
+Guided wizard for first-time setup. Checks prerequisites, authenticates with Slack, and creates configuration.
 
 ### View Configuration
 
@@ -174,17 +231,39 @@ slack-logs/
 
 Each markdown file contains the messages from that channel for that date.
 
+### Direct Message Naming
+
+Direct messages (DMs) are named using the other participant's username:
+- `dm_alice.smith` - DM with Alice Smith
+- `dm_bob` - DM with Bob
+
+For external users from Slack Connect, names are resolved via the Slack API and cached locally for performance.
+
+## Data Storage
+
+slack-export stores data in standard locations:
+
+| Data | Location | Purpose |
+|------|----------|---------|
+| Configuration | `~/.config/slack-export/slack-export.yaml` | User settings |
+| User cache | `~/.cache/slack-export/users.json` | Cached external user info |
+| Exports | Configured `output_dir` (default: `./slack-logs`) | Exported messages |
+
+The user cache stores information about external Slack Connect users to avoid repeated API calls.
+
 ## How It Works
 
 1. **Channel Discovery**: Uses Slack's Edge API (`/api/client.userBoot` and `/api/conversations.list`) to get active channels. This is much faster than the standard API.
 
-2. **Filtering**: Applies include/exclude glob patterns to the channel list.
+2. **User Resolution**: Fetches workspace users and resolves DM names to human-readable usernames. External Slack Connect users are looked up via the `users.info` API and cached to disk.
 
-3. **Export**: Calls slackdump to archive messages for the specified time range.
+3. **Filtering**: Applies include/exclude glob patterns to the channel list.
 
-4. **Format**: Uses slackdump's `convert` command to transform the archive into readable text.
+4. **Export**: Calls slackdump to archive messages for the specified time range.
 
-5. **Organize**: Extracts and renames files into the dated directory structure.
+5. **Format**: Uses slackdump's `convert` command to transform the archive into readable text.
+
+6. **Organize**: Extracts and renames files into the dated directory structure.
 
 ## Troubleshooting
 
@@ -211,6 +290,14 @@ Your include/exclude patterns are too restrictive. Run `slack-export channels` t
 Exports use the configured timezone for date boundaries. If messages appear on the wrong date:
 1. Check your `timezone` setting matches your Slack workspace's primary timezone
 2. Use `slack-export config` to verify the current setting
+
+### DM shows user ID instead of name
+
+If a DM appears as `dm_U015ANT8LLD` instead of `dm_alice`, the user couldn't be resolved. This can happen with:
+- Deactivated users
+- Users from Slack Connect organizations that restrict the `users.info` API
+
+The user cache at `~/.cache/slack-export/users.json` can be manually edited if needed.
 
 ## Development
 
