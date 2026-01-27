@@ -84,18 +84,18 @@ When upstream slackdump merges the bug fix, see **se-2g5** for the migration pla
 - [ ] Push bug fix branch to the fork
 
 **Code changes:**
-- [ ] Update `FindSlackdump()` - remove configPath, add bundled-first logic
-- [ ] Update all call sites of `FindSlackdump`
-- [ ] Remove any config options for slackdump path
-- [ ] Add `.exe` suffix handling for Windows
+- [x] Update `FindSlackdump()` - remove configPath, add bundled-first logic
+- [x] Update all call sites of `FindSlackdump`
+- [x] Remove any config options for slackdump path
+- [x] Add `.exe` suffix handling for Windows
 
 **Release infrastructure:**
-- [ ] Create `.github/workflows/release.yml`
-- [ ] Build matrix for all 5 platforms
-- [ ] Package as .tar.gz (unix) / .zip (windows)
-- [ ] Create GitHub release on tag push
+- [x] Create `.github/workflows/release.yml`
+- [x] Build matrix for all 5 platforms
+- [x] Package as .tar.gz (unix) / .zip (windows)
+- [x] Create GitHub release on tag push
 
 **Testing:**
-- [ ] Bundled binary detection works
-- [ ] PATH fallback works for development
+- [x] Bundled binary detection works
+- [x] PATH fallback works for development
 - [ ] Release workflow succeeds with test tag
