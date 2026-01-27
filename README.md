@@ -76,7 +76,51 @@ slack-export sync
 
 Exports all channels from your last export date through today. On first run, exports today's messages.
 
-That's it. Run `slack-export sync` daily (or add it to a cron job) to keep your logs up to date.
+Run `slack-export sync` daily (or add it to a cron job) to keep your logs up to date.
+
+### Backfilling older messages
+
+To export messages from before your first sync, use the `export` command:
+
+```bash
+# Export a specific date
+slack-export export 2025-01-15
+
+# Export a date range
+slack-export export --from 2025-01-01 --to 2025-01-15
+```
+
+After backfilling, `sync` will continue from the earliest date in your output directory.
+
+### Configuring channels
+
+By default, all channels are exported. To see which channels will be processed:
+
+```bash
+slack-export channels
+```
+
+To filter by channels with activity on a specific date:
+
+```bash
+slack-export channels --since 2025-01-20
+```
+
+To change which channels are exported, edit `~/.config/slack-export/slack-export.yaml`:
+
+```yaml
+# Only export these channels (glob patterns, empty = all)
+include:
+  - "engineering-*"
+  - "team-*"
+
+# Never export these channels
+exclude:
+  - "*-alerts"
+  - "bot-*"
+```
+
+After editing, run `slack-export channels` again to verify your changes.
 
 ## Configuration
 
