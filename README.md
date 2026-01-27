@@ -408,6 +408,12 @@ rm ~/.local/bin/slack-export ~/.local/bin/slackdump
 rm -rf ~/.config/slack-export ~/.cache/slack-export
 ```
 
+## Notes
+
+### Bundled slackdump
+
+slack-export currently bundles a patched version of [slackdump](https://github.com/rusq/slackdump) due to a bug in the upstream release. Once the fix is merged, we'll switch to installing slackdump from the official repository. This change will be seamless—the installer will handle it automatically.
+
 ## Development
 
 ```bash
