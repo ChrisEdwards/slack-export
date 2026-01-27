@@ -69,6 +69,32 @@ Triggered on tag push (e.g., `v1.0.0`):
 
 The workflow builds slackdump from the fork as part of the slack-export release process (no separate slackdump releases needed).
 
+## Creating a Release
+
+To create a new release:
+
+```bash
+# Ensure you're on main with all changes committed
+git checkout main
+git pull
+
+# Create and push a version tag
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+This triggers the GitHub Actions release workflow which:
+1. Builds slack-export and slackdump for all 5 platforms
+2. Packages them into archives (`.tar.gz` for Unix, `.zip` for Windows)
+3. Creates a GitHub release with all archives attached
+
+**Platforms included:**
+- `darwin-arm64` (Apple Silicon Mac)
+- `darwin-amd64` (Intel Mac)
+- `linux-amd64`
+- `linux-arm64`
+- `windows-amd64`
+
 ## Future: Upstream Transition
 
 When upstream slackdump merges the bug fix, see **se-2g5** for the migration plan:
