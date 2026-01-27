@@ -457,6 +457,7 @@ func (c *EdgeClient) GetActiveChannelsWithUsers(
 			IsArchived:  ch.IsArchived,
 			IsMember:    ch.IsMember,
 			IsMPIM:      ch.IsMpim,
+			Created:     time.Unix(ch.Created, 0),
 			LastMessage: latest,
 		})
 	}
@@ -524,6 +525,7 @@ func (c *EdgeClient) GetActiveChannelsWithResolver(
 			IsArchived:  ch.IsArchived,
 			IsMember:    ch.IsMember,
 			IsMPIM:      ch.IsMpim,
+			Created:     time.Unix(ch.Created, 0),
 			LastMessage: latest,
 		})
 	}

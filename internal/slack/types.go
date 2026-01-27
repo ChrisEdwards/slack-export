@@ -17,6 +17,7 @@ type Channel struct {
 	IsPrivate   bool      // Private flag
 	IsArchived  bool      // Archived flag
 	IsMember    bool      // User is member
+	Created     time.Time // Channel creation timestamp
 	LastRead    time.Time // Last read timestamp
 	LastMessage time.Time // Most recent message timestamp
 }
