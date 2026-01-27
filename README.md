@@ -99,17 +99,19 @@ slack-export export --from 2025-01-01 --to 2025-01-15
 
 ### Configuring channels
 
-By default, all channels you're a member of are exported. To see which channels will be processed:
+By default, all channels you're a member of are exported. To see all your channels:
 
 ```bash
 slack-export channels
 ```
 
-To filter by channels with activity on a specific date:
+This shows every channel you're a member of (or have been) with any activity ever. To see which channels have recent activity:
 
 ```bash
 slack-export channels --since 2025-01-20
 ```
+
+Note: The `channels` command shows what *could* be exported. When you run `sync` or `export`, only channels with actual messages on each specific day are included in that day's export.
 
 To change which channels are exported, edit `~/.config/slack-export/slack-export.yaml`:
 
