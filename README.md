@@ -1,16 +1,34 @@
 # slack-export
 
-A CLI tool that exports Slack channel logs to dated markdown files. It uses the Slack Edge API for fast channel detection and [slackdump](https://github.com/rusq/slackdump) for message export.
+Export your Slack conversations to markdown files that AI agents can read.
+
+**The problem:** AI coding agents like Claude Code can't access Slack. They can't see what your team discussed, what decisions were made, or what tasks were assigned.
+
+**The solution:** Run `slack-export sync` daily to export your Slack channels to local markdown files. Point your AI agent at the folder, and it can now search and reference your team's conversations.
+
+```
+~/slack-logs/
+├── 2025-01-25/
+│   ├── engineering.md
+│   ├── team-backend.md
+│   └── dm_alice.md
+├── 2025-01-26/
+│   ├── engineering.md
+│   ├── project-atlas.md
+│   └── dm_bob.md
+└── 2025-01-27/
+    └── engineering.md
+```
+
+Each file contains that day's messages in clean, readable markdown.
 
 ## Features
 
-- **Fast channel discovery** via Slack's Edge API
-- **Glob-based filtering** to include/exclude channels by name patterns
-- **Timezone-aware** date boundaries for accurate daily exports
-- **Automatic sync** from last export date to today
-- **Clean markdown output** organized by date and channel
-- **Human-readable DM names** (e.g., `dm_alice` instead of `dm_U015ANT8LLD`)
-- **Slack Connect support** with automatic external user resolution and caching
+- **Daily sync** - exports from your last export date through today
+- **Glob filtering** - include/exclude channels by pattern (e.g., `team-*`, `*-alerts`)
+- **Human-readable DMs** - `dm_alice` instead of `dm_U015ANT8LLD`
+- **Timezone-aware** - accurate date boundaries for your location
+- **Slack Connect support** - resolves external users automatically
 
 ## Installation
 
