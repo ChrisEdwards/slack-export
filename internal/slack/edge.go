@@ -487,6 +487,82 @@ func resolveDMName(userID string, userIndex UserIndex) string {
 	return fmt.Sprintf("dm_%s", userIndex.Username(userID))
 }
 
+// GetActiveChannelsWithResolver returns active channels with DM names resolved via UserResolver.
+// This supports external Slack Connect users through cache and API fallback.
+func (c *EdgeClient) GetActiveChannelsWithResolver(
+	ctx context.Context,
+	since time.Time,
+	resolver *UserResolver,
+) ([]Channel, error) {
+	boot, err := c.ClientUserBoot(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("userBoot: %w", err)
+	}
+
+	counts, err := c.ClientCounts(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("counts: %w", err)
+	}
+
+	latestByID := buildTimestampLookup(counts)
+	includeAll := since.IsZero()
+
+	var active []Channel
+
+	// Process regular channels
+	for _, ch := range boot.Channels {
+		latest := latestByID[ch.ID]
+		if !includeAll && (latest.IsZero() || latest.Before(since)) {
+			continue
+		}
+		active = append(active, Channel{
+			ID:          ch.ID,
+			Name:        ch.Name,
+			IsChannel:   ch.IsChannel,
+			IsGroup:     ch.IsGroup,
+			IsPrivate:   ch.IsPrivate,
+			IsArchived:  ch.IsArchived,
+			IsMember:    ch.IsMember,
+			IsMPIM:      ch.IsMpim,
+			LastMessage: latest,
+		})
+	}
+
+	// Process DMs with resolver
+	for _, im := range boot.IMs {
+		latest := latestByID[im.ID]
+		if !includeAll && (latest.IsZero() || latest.Before(since)) {
+			continue
+		}
+
+		name, err := resolveDMNameWithResolver(ctx, im.User, resolver)
+		if err != nil {
+			return nil, fmt.Errorf("resolving DM user %s: %w", im.User, err)
+		}
+
+		active = append(active, Channel{
+			ID:          im.ID,
+			Name:        name,
+			IsIM:        true,
+			LastMessage: latest,
+		})
+	}
+
+	return active, nil
+}
+
+// resolveDMNameWithResolver generates a DM channel name using the UserResolver.
+func resolveDMNameWithResolver(ctx context.Context, userID string, resolver *UserResolver) (string, error) {
+	if resolver == nil {
+		return fmt.Sprintf("dm_%s", userID), nil
+	}
+	username, err := resolver.Username(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("dm_%s", username), nil
+}
+
 // buildTimestampLookup creates a map from channel ID to latest message time.
 func buildTimestampLookup(counts *CountsResponse) map[string]time.Time {
 	lookup := make(map[string]time.Time)

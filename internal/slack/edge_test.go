@@ -1846,3 +1846,98 @@ func TestEdgeClient_FetchUserInfo_APIError(t *testing.T) {
 		t.Errorf("expected user_not_found in error, got: %v", err)
 	}
 }
+
+func TestEdgeClient_GetActiveChannelsWithResolver_ExternalUser(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {"id": "U000", "team_id": "T123", "name": "self"},
+				"team": {"id": "T123", "name": "TestTeam", "domain": "test"},
+				"ims": [{"id": "D001", "user": "U_EXTERNAL", "is_im": true, "is_open": true}],
+				"channels": []
+			}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"channels": [],
+				"mpims": [],
+				"ims": [{"id": "D001", "latest": "1700000000.000000"}]
+			}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	creds := &Credentials{Token: "xoxc-test"}
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
+
+	// Empty workspace index - user not found locally
+	idx := NewUserIndex(nil)
+
+	// Cache has the external user
+	cache := NewUserCache("")
+	cache.Set(&User{ID: "U_EXTERNAL", Name: "external.user"})
+
+	resolver := NewUserResolver(idx, cache, nil)
+
+	channels, err := client.GetActiveChannelsWithResolver(context.Background(), time.Time{}, resolver)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(channels) != 1 {
+		t.Fatalf("expected 1 channel, got %d", len(channels))
+	}
+
+	// Should resolve to username, not raw ID
+	if channels[0].Name != "dm_external.user" {
+		t.Errorf("expected dm_external.user, got %s", channels[0].Name)
+	}
+}
+
+func TestEdgeClient_GetActiveChannelsWithResolver_NilResolver(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"self": {}, "team": {},
+				"ims": [{"id": "D001", "user": "U456", "is_im": true}],
+				"channels": []
+			}`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/client.counts") {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"ims": [{"id": "D001", "latest": "1700000000.000000"}]
+			}`))
+			return
+		}
+	}))
+	defer server.Close()
+
+	creds := &Credentials{Token: "xoxc-test"}
+	client := NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/")
+
+	channels, err := client.GetActiveChannelsWithResolver(context.Background(), time.Time{}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(channels) != 1 {
+		t.Fatalf("expected 1 channel, got %d", len(channels))
+	}
+
+	// Falls back to user ID when resolver is nil
+	if channels[0].Name != "dm_U456" {
+		t.Errorf("expected dm_U456, got %s", channels[0].Name)
+	}
+}
