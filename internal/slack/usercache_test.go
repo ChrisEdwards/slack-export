@@ -3,6 +3,7 @@ package slack
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -85,5 +86,19 @@ func TestUserCache_SaveCreatesDir(t *testing.T) {
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Error("expected file to exist after Save")
+	}
+}
+
+func TestDefaultCachePath(t *testing.T) {
+	path := DefaultCachePath()
+
+	// Should contain slack-export in path
+	if !strings.Contains(path, "slack-export") {
+		t.Errorf("expected slack-export in path, got %s", path)
+	}
+
+	// Should end with users.json
+	if !strings.HasSuffix(path, "users.json") {
+		t.Errorf("expected users.json suffix, got %s", path)
 	}
 }

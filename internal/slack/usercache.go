@@ -106,3 +106,13 @@ func (c *UserCache) Save() error {
 
 	return os.WriteFile(c.path, data, 0600)
 }
+
+// DefaultCachePath returns the default path for the user cache.
+// Uses XDG Base Directory spec: ~/.cache/slack-export/users.json
+func DefaultCachePath() string {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		cacheDir = os.TempDir()
+	}
+	return filepath.Join(cacheDir, "slack-export", "users.json")
+}
