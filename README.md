@@ -82,6 +82,16 @@ make build
 go install github.com/rusq/slackdump/v3/cmd/slackdump@latest
 ```
 
+### Uninstall
+
+```bash
+# Remove binaries
+rm ~/.local/bin/slack-export ~/.local/bin/slackdump
+
+# Remove config and cache (optional)
+rm -rf ~/.config/slack-export ~/.cache/slack-export
+```
+
 ## Getting Started
 
 The easiest way to get started is with the interactive setup wizard:
