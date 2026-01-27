@@ -9,18 +9,18 @@ Export your Slack conversations to markdown files that AI agents can read.
 ```
 ~/slack-logs/
 ├── 2025-01-25/
-│   ├── engineering.md
-│   ├── team-backend.md
-│   └── dm_alice.md
+│   ├── 2025-01-25-engineering.md
+│   ├── 2025-01-25-team-backend.md
+│   └── 2025-01-25-dm_alice.md
 ├── 2025-01-26/
-│   ├── engineering.md
-│   ├── project-atlas.md
-│   └── dm_bob.md
+│   ├── 2025-01-26-engineering.md
+│   ├── 2025-01-26-project-atlas.md
+│   └── 2025-01-26-dm_bob.md
 └── 2025-01-27/
-    └── engineering.md
+    └── 2025-01-27-engineering.md
 ```
 
-Each file contains that day's messages in clean, readable markdown.
+Each file contains that day's messages in clean, readable markdown. Filenames include the date so they stay unique when you copy multiple days to one folder or upload to AI tools like Gemini or NotebookLM.
 
 ## Features
 
@@ -241,25 +241,17 @@ Exports are organized by date and channel:
 ```
 slack-logs/
 ├── 2026-01-20/
-│   ├── engineering-general.md
-│   ├── team-backend.md
-│   └── project-alpha.md
+│   ├── 2026-01-20-engineering-general.md
+│   ├── 2026-01-20-team-backend.md
+│   └── 2026-01-20-dm_alice.md
 ├── 2026-01-21/
-│   ├── engineering-general.md
-│   └── team-backend.md
+│   ├── 2026-01-21-engineering-general.md
+│   └── 2026-01-21-team-backend.md
 └── 2026-01-22/
-    └── engineering-general.md
+    └── 2026-01-22-engineering-general.md
 ```
 
-Each markdown file contains the messages from that channel for that date.
-
-### Direct Message Naming
-
-Direct messages (DMs) are named using the other participant's username:
-- `dm_alice.smith` - DM with Alice Smith
-- `dm_bob` - DM with Bob
-
-For external users from Slack Connect, names are resolved via the Slack API and cached locally for performance.
+Direct messages use the other participant's username (e.g., `dm_alice`). External Slack Connect users are resolved via the API and cached locally.
 
 ## Data Storage
 
