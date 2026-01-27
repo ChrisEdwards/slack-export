@@ -36,77 +36,47 @@ Each file contains that day's messages in clean, readable markdown. Filenames in
 curl -fsSL https://raw.githubusercontent.com/ChrisEdwards/slack-export/main/install.sh | sh
 ```
 
-This auto-detects your platform and installs both `slack-export` and `slackdump` to `~/.local/bin`. Run the same command to upgrade to the latest version. The installer tells you what to do next.
+This auto-detects your platform and installs both `slack-export` and `slackdump` to `~/.local/bin`. Run the same command to upgrade. The installer tells you what to do next.
 
 To install to a different directory:
 ```bash
 INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/ChrisEdwards/slack-export/main/install.sh | sh
 ```
 
-### Manual Download
-
-Download the appropriate archive for your platform from [Releases](https://github.com/ChrisEdwards/slack-export/releases):
-
-| Platform | File |
-|----------|------|
-| macOS (Apple Silicon) | `slack-export-vX.X.X-darwin-arm64.tar.gz` |
-| macOS (Intel) | `slack-export-vX.X.X-darwin-amd64.tar.gz` |
-| Linux (x86_64) | `slack-export-vX.X.X-linux-amd64.tar.gz` |
-| Linux (ARM64) | `slack-export-vX.X.X-linux-arm64.tar.gz` |
-| Windows | `slack-export-vX.X.X-windows-amd64.zip` |
-
-Extract and install both binaries:
-
-```bash
-# macOS/Linux
-tar -xzf slack-export-*.tar.gz
-sudo mv slack-export slackdump /usr/local/bin/
-
-# Windows (PowerShell)
-Expand-Archive slack-export-*.zip -DestinationPath .
-# Move slack-export.exe and slackdump.exe to a directory in your PATH
-```
-
-The release includes both `slack-export` and `slackdump` bundled together.
-
-### From Source
-
-Requires Go 1.21+ and a separate slackdump installation:
-
-```bash
-git clone https://github.com/chrisedwards/slack-export.git
-cd slack-export
-make build
-
-# Also install slackdump separately
-go install github.com/rusq/slackdump/v3/cmd/slackdump@latest
-```
-
-### Uninstall
-
-```bash
-# Remove binaries
-rm ~/.local/bin/slack-export ~/.local/bin/slackdump
-
-# Remove config and cache (optional)
-rm -rf ~/.config/slack-export ~/.cache/slack-export
-```
+See [Alternative Installation](#alternative-installation) for manual download or building from source.
 
 ## Getting Started
 
-The easiest way to get started is with the interactive setup wizard:
+### 1. Authenticate with Slack
+
+```bash
+slackdump auth
+```
+
+Opens a browser to authenticate with your Slack workspace. Your credentials are stored locally and encrypted.
+
+### 2. Run the setup wizard
 
 ```bash
 slack-export init
 ```
 
-This walks you through:
-1. **Installing slackdump** - offers to install if not found
-2. **Authenticating with Slack** - runs `slackdump auth` if needed
-3. **Configuring output directory and timezone** - with sensible defaults
-4. **Verifying the setup** - connects to Slack and shows sample channels
+Walks you through configuration:
+- Output directory for exported logs
+- Timezone for date boundaries
+- Verifies connection to Slack
 
-You can re-run `slack-export init --force` to reconfigure at any time.
+Re-run with `--force` to reconfigure anytime.
+
+### 3. Export your messages
+
+```bash
+slack-export sync
+```
+
+Exports all channels from your last export date through today. On first run, exports today's messages.
+
+That's it. Run `slack-export sync` daily (or add it to a cron job) to keep your logs up to date.
 
 ## Configuration
 
@@ -331,23 +301,62 @@ Slack threads are exported on the date the thread was created, not when replies 
 
 This is a limitation of how slackdump organizes thread data.
 
+## Alternative Installation
+
+### Manual Download
+
+Download the appropriate archive from [Releases](https://github.com/ChrisEdwards/slack-export/releases):
+
+| Platform | File |
+|----------|------|
+| macOS (Apple Silicon) | `slack-export-vX.X.X-darwin-arm64.tar.gz` |
+| macOS (Intel) | `slack-export-vX.X.X-darwin-amd64.tar.gz` |
+| Linux (x86_64) | `slack-export-vX.X.X-linux-amd64.tar.gz` |
+| Linux (ARM64) | `slack-export-vX.X.X-linux-arm64.tar.gz` |
+| Windows | `slack-export-vX.X.X-windows-amd64.zip` |
+
+Extract and install:
+
+```bash
+# macOS/Linux
+tar -xzf slack-export-*.tar.gz
+mv slack-export slackdump ~/.local/bin/
+
+# Windows (PowerShell)
+Expand-Archive slack-export-*.zip -DestinationPath .
+# Move slack-export.exe and slackdump.exe to a directory in your PATH
+```
+
+### From Source
+
+Requires Go 1.21+:
+
+```bash
+git clone https://github.com/chrisedwards/slack-export.git
+cd slack-export
+make build
+
+# Also install slackdump separately
+go install github.com/rusq/slackdump/v3/cmd/slackdump@latest
+```
+
+### Uninstall
+
+```bash
+# Remove binaries
+rm ~/.local/bin/slack-export ~/.local/bin/slackdump
+
+# Remove config and cache (optional)
+rm -rf ~/.config/slack-export ~/.cache/slack-export
+```
+
 ## Development
 
 ```bash
-# Build
-make build
-
-# Run tests
-make test
-
-# Run linter
-make check
-
-# Run both
-make check-test
-
-# Verbose output
-make test VERBOSE=1
+make build       # Build
+make test        # Run tests
+make check       # Run linter
+make check-test  # Run both
 ```
 
 ## License
