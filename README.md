@@ -90,7 +90,7 @@ slack-export export 2025-01-15
 slack-export export --from 2025-01-01 --to 2025-01-15
 ```
 
-After backfilling, `sync` will continue from the earliest date in your output directory.
+After exporting, `sync` continues from the most recent date in your output directory. So if you export an earlier date, the next `sync` will backfill everything from that date through today.
 
 ### Configuring channels
 
