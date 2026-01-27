@@ -89,9 +89,22 @@ func (e *Exporter) ExportDate(ctx context.Context, date string) error {
 		return fmt.Errorf("fetching users: %w", err)
 	}
 
-	allChannels, err := e.edgeClient.GetActiveChannelsWithUsers(ctx, start, userIndex)
+	// Set up external user cache for Slack Connect users
+	cache := slack.NewUserCache(slack.DefaultCachePath())
+	if err := cache.Load(); err != nil {
+		return fmt.Errorf("loading user cache: %w", err)
+	}
+
+	resolver := slack.NewUserResolver(userIndex, cache, e.edgeClient)
+
+	allChannels, err := e.edgeClient.GetActiveChannelsWithResolver(ctx, start, resolver)
 	if err != nil {
 		return fmt.Errorf("getting active channels: %w", err)
+	}
+
+	// Save cache after successful fetch (may have new external users)
+	if err := cache.Save(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to save user cache: %v\n", err)
 	}
 
 	if len(allChannels) == 0 {
