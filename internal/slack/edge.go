@@ -300,6 +300,7 @@ func (c *EdgeClient) fetchUsersPage(ctx context.Context, cursor string) ([]User,
 	form := url.Values{}
 	form.Set("token", c.creds.Token)
 	form.Set("limit", "200")
+	form.Set("include_locale", "false")
 	if cursor != "" {
 		form.Set("cursor", cursor)
 	}
@@ -436,12 +437,13 @@ func (c *EdgeClient) GetActiveChannelsWithUsers(
 }
 
 // resolveDMName generates a DM channel name from a user ID.
-// If userIndex is provided, uses the display name; otherwise uses the raw ID.
+// If userIndex is provided, uses the username (e.g., "john.ament"); otherwise uses the raw ID.
+// The result matches the format used in MPDM channel names.
 func resolveDMName(userID string, userIndex UserIndex) string {
 	if userIndex == nil {
 		return fmt.Sprintf("dm_%s", userID)
 	}
-	return fmt.Sprintf("dm_%s", userIndex.DisplayName(userID))
+	return fmt.Sprintf("dm_%s", userIndex.Username(userID))
 }
 
 // buildTimestampLookup creates a map from channel ID to latest message time.

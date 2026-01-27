@@ -1489,6 +1489,36 @@ func TestUserIndex_Empty(t *testing.T) {
 	}
 }
 
+func TestUserIndex_Username(t *testing.T) {
+	users := []User{
+		{ID: "U001", Name: "alice.smith", RealName: "Alice Smith", Profile: UserProfile{DisplayName: "Alice"}},
+		{ID: "U002", Name: "Bob.Jones", RealName: "Bob Jones", Profile: UserProfile{}},
+		{ID: "U003", Name: "", RealName: "Carol", Profile: UserProfile{}},
+	}
+	idx := NewUserIndex(users)
+
+	tests := []struct {
+		name     string
+		userID   string
+		expected string
+	}{
+		{"returns lowercase username", "U001", "alice.smith"},
+		{"converts uppercase to lowercase", "U002", "bob.jones"},
+		{"falls back to ID when name empty", "U003", "U003"},
+		{"falls back to ID for unknown user", "U999", "U999"},
+		{"empty user ID returns unknown", "", "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := idx.Username(tt.userID)
+			if got != tt.expected {
+				t.Errorf("Username(%q) = %q, want %q", tt.userID, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestEdgeClient_FetchUsers_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/users.list" {
@@ -1675,16 +1705,16 @@ func TestEdgeClient_GetActiveChannelsWithUsers_ResolvesNames(t *testing.T) {
 		nameByID[ch.ID] = ch.Name
 	}
 
-	if nameByID["D001"] != "dm_Alice" {
-		t.Errorf("D001: expected dm_Alice, got %s", nameByID["D001"])
+	if nameByID["D001"] != "dm_alice" {
+		t.Errorf("D001: expected dm_alice, got %s", nameByID["D001"])
 	}
 
-	if nameByID["D002"] != "dm_Bob Jones" {
-		t.Errorf("D002: expected dm_Bob Jones, got %s", nameByID["D002"])
+	if nameByID["D002"] != "dm_bob" {
+		t.Errorf("D002: expected dm_bob, got %s", nameByID["D002"])
 	}
 
-	if nameByID["D003"] != "dm_<unknown>:U999" {
-		t.Errorf("D003: expected dm_<unknown>:U999, got %s", nameByID["D003"])
+	if nameByID["D003"] != "dm_U999" {
+		t.Errorf("D003: expected dm_U999, got %s", nameByID["D003"])
 	}
 }
 
@@ -1736,8 +1766,8 @@ func TestResolveDMName(t *testing.T) {
 		index    UserIndex
 		expected string
 	}{
-		{"with index and known user", "U001", userIndex, "dm_Alice"},
-		{"with index and unknown user", "U999", userIndex, "dm_<unknown>:U999"},
+		{"with index and known user", "U001", userIndex, "dm_alice"},
+		{"with index and unknown user", "U999", userIndex, "dm_U999"},
 		{"nil index", "U001", nil, "dm_U001"},
 	}
 

@@ -1,5 +1,7 @@
 package slack
 
+import "strings"
+
 // UserBootResponse is the response from the client.userBoot Edge API endpoint.
 // Contains all channels, DMs, and groups the user has access to.
 type UserBootResponse struct {
@@ -143,4 +145,21 @@ func (idx UserIndex) DisplayName(id string) string {
 		return user.Name
 	}
 	return "<unknown>:" + id
+}
+
+// Username returns the username (login name) for the given user ID.
+// This returns the Name field in lowercase, which is the email prefix format (e.g., "john.ament").
+// Falls back to the user ID if the user is not found.
+func (idx UserIndex) Username(id string) string {
+	if id == "" {
+		return "unknown"
+	}
+	user, ok := idx[id]
+	if !ok {
+		return id
+	}
+	if user.Name != "" {
+		return strings.ToLower(user.Name)
+	}
+	return id
 }
