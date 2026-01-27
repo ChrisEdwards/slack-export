@@ -76,6 +76,8 @@ slack-export sync
 
 Exports all channels from your last export date through today. On first run, exports today's messages.
 
+Sync always re-exports the most recent date in your output directory. This ensures you get a complete day even if you ran a previous export mid-day.
+
 Run `slack-export sync` daily (or add it to a cron job) to keep your logs up to date.
 
 ### Backfilling older messages
