@@ -388,8 +388,9 @@ func TestParseCredentials_Success(t *testing.T) {
 		t.Errorf("Workspace = %q, want test-workspace", creds.Workspace)
 	}
 
-	if creds.TeamID != "T12345678" {
-		t.Errorf("TeamID = %q, want T12345678", creds.TeamID)
+	// TeamID is no longer extracted from tokens; it's obtained via AuthTest()
+	if creds.TeamID != "" {
+		t.Errorf("TeamID = %q, want empty (TeamID is set via AuthTest)", creds.TeamID)
 	}
 
 	if len(creds.Cookies) != 1 {
@@ -463,83 +464,6 @@ func TestParseCredentials_NoCookies(t *testing.T) {
 	}
 }
 
-func TestExtractTeamID_XoxcToken(t *testing.T) {
-	tests := []struct {
-		name  string
-		token string
-		want  string
-	}{
-		{
-			name:  "standard xoxc token",
-			token: "xoxc-T12345678-U12345678-1234567890-abcdef123456",
-			want:  "T12345678",
-		},
-		{
-			name:  "longer team ID",
-			token: "xoxc-T0123456789AB-U12345678-1234567890-hash",
-			want:  "T0123456789AB",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractTeamID(tt.token)
-			if got != tt.want {
-				t.Errorf("extractTeamID(%q) = %q, want %q", tt.token, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestExtractTeamID_NonXoxcTokens(t *testing.T) {
-	tests := []struct {
-		name  string
-		token string
-	}{
-		{name: "xoxb token", token: "xoxb-123-456-abc"},
-		{name: "xoxp token", token: "xoxp-123-456-abc"},
-		{name: "empty token", token: ""},
-		{name: "random string", token: "not-a-token"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractTeamID(tt.token)
-			if got != "" {
-				t.Errorf("extractTeamID(%q) = %q, want empty string", tt.token, got)
-			}
-		})
-	}
-}
-
-func TestExtractTeamID_EdgeCases(t *testing.T) {
-	tests := []struct {
-		name  string
-		token string
-		want  string
-	}{
-		{
-			name:  "xoxc with only prefix",
-			token: "xoxc-",
-			want:  "",
-		},
-		{
-			name:  "xoxc with one part",
-			token: "xoxc-TEAM",
-			want:  "TEAM",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractTeamID(tt.token)
-			if got != tt.want {
-				t.Errorf("extractTeamID(%q) = %q, want %q", tt.token, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestLoadCredentials_Integration(t *testing.T) {
 	// Create a temporary directory structure that mimics slackdump cache
 	tmpDir := t.TempDir()
@@ -598,8 +522,9 @@ func TestLoadCredentials_Integration(t *testing.T) {
 		t.Errorf("Workspace = %q, want %q", creds.Workspace, workspace)
 	}
 
-	if creds.TeamID != "T12345678" {
-		t.Errorf("TeamID = %q, want T12345678", creds.TeamID)
+	// TeamID is no longer extracted from tokens; it's obtained via AuthTest()
+	if creds.TeamID != "" {
+		t.Errorf("TeamID = %q, want empty (TeamID is set via AuthTest)", creds.TeamID)
 	}
 
 	if len(creds.Cookies) != 1 || creds.Cookies[0].Name != "d" {
@@ -834,7 +759,8 @@ func TestCredentials_Validate_WrongTokenFormat(t *testing.T) {
 	}
 }
 
-func TestCredentials_Validate_EmptyTeamID(t *testing.T) {
+func TestCredentials_Validate_EmptyTeamID_Passes(t *testing.T) {
+	// TeamID is no longer validated here; it's obtained via AuthTest()
 	creds := &Credentials{
 		Token:     "xoxc-T12345678-U12345678-1234567890-abc123",
 		TeamID:    "",
@@ -842,46 +768,7 @@ func TestCredentials_Validate_EmptyTeamID(t *testing.T) {
 	}
 
 	err := creds.Validate()
-	if err == nil {
-		t.Error("Validate() expected error for empty team ID")
-	}
-	if !strings.Contains(err.Error(), "team ID is missing") {
-		t.Errorf("Validate() error = %q, want error containing 'team ID is missing'", err)
-	}
-}
-
-func TestCredentials_Validate_MultipleErrors(t *testing.T) {
-	// When multiple fields are invalid, empty token takes precedence
-	creds := &Credentials{
-		Token:     "",
-		TeamID:    "",
-		Workspace: "",
-	}
-
-	err := creds.Validate()
-	if err == nil {
-		t.Error("Validate() expected error")
-	}
-	// Token check comes first
-	if !strings.Contains(err.Error(), "token is empty") {
-		t.Errorf("Validate() should check token first, got: %q", err)
-	}
-}
-
-func TestCredentials_Validate_TokenFormatBeforeTeamID(t *testing.T) {
-	// When token format is wrong and team ID is missing, token format error takes precedence
-	creds := &Credentials{
-		Token:     "xoxb-invalid",
-		TeamID:    "",
-		Workspace: "",
-	}
-
-	err := creds.Validate()
-	if err == nil {
-		t.Error("Validate() expected error")
-	}
-	// Token format check comes before team ID check
-	if !strings.Contains(err.Error(), "unexpected token format") {
-		t.Errorf("Validate() should check token format before team ID, got: %q", err)
+	if err != nil {
+		t.Errorf("Validate() unexpected error for empty team ID: %v", err)
 	}
 }

@@ -260,27 +260,10 @@ func parseCredentials(data []byte, workspace string) (*Credentials, error) {
 		Workspace: workspace,
 	}
 
-	// Extract TeamID from xoxc token format: xoxc-TEAMID-USERID-TIMESTAMP-HASH
-	creds.TeamID = extractTeamID(raw.Token)
+	// Note: TeamID is obtained by calling EdgeClient.AuthTest() after loading credentials.
+	// The xoxc token format does not contain the TeamID directly.
 
 	return creds, nil
-}
-
-// extractTeamID extracts the team ID from an xoxc token.
-// Token format: xoxc-TEAMID-USERID-TIMESTAMP-HASH
-// Returns empty string if extraction fails.
-func extractTeamID(token string) string {
-	if !strings.HasPrefix(token, "xoxc-") {
-		return ""
-	}
-
-	parts := strings.Split(token, "-")
-	if len(parts) < 2 {
-		return ""
-	}
-
-	// Second part is the team ID
-	return parts[1]
 }
 
 // getCacheDir returns the path to slackdump's cache directory.
@@ -344,22 +327,18 @@ func deriveKey(machineID string) []byte {
 }
 
 // Validate verifies that credentials are complete and correctly formatted.
-// Returns an error if the token is empty, has an unexpected format, or if
-// the team ID is missing.
+// Returns an error if the token is empty or has an unexpected format.
+// Note: TeamID is not validated here; it is obtained via EdgeClient.AuthTest().
 func (c *Credentials) Validate() error {
 	if c.Token == "" {
 		return errors.New("token is empty")
 	}
 	if !strings.HasPrefix(c.Token, "xoxc-") {
-		// Show token preview safely (avoid panic on short tokens)
 		preview := c.Token
 		if len(preview) > 10 {
 			preview = preview[:10] + "..."
 		}
 		return fmt.Errorf("unexpected token format: %s", preview)
-	}
-	if c.TeamID == "" {
-		return errors.New("team ID is missing")
 	}
 	return nil
 }
