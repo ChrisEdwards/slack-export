@@ -46,11 +46,13 @@ func Archive(
 		return "", errors.New("no channels to archive")
 	}
 
+	// slackdump expects datetime without timezone suffix (e.g., "2006-01-02T15:04:05")
+	const slackdumpTimeFormat = "2006-01-02T15:04:05"
 	args := []string{
 		"archive",
 		"-files=false",
-		fmt.Sprintf("-time-from=%s", timeFrom.UTC().Format(time.RFC3339)),
-		fmt.Sprintf("-time-to=%s", timeTo.UTC().Format(time.RFC3339)),
+		fmt.Sprintf("-time-from=%s", timeFrom.UTC().Format(slackdumpTimeFormat)),
+		fmt.Sprintf("-time-to=%s", timeTo.UTC().Format(slackdumpTimeFormat)),
 	}
 	args = append(args, channelIDs...)
 
@@ -63,14 +65,20 @@ func Archive(
 	cmd := exec.CommandContext(ctx, slackdumpPath, args...)
 	cmd.Dir = tmpDir
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("slackdump archive failed: %w\nOutput: %s", err, output)
+	// Debug: show the command being run
+	fmt.Printf("EXECUTING: %s %s\n", slackdumpPath, strings.Join(args, " "))
+
+	// Stream output in real-time so we can see progress
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("slackdump archive failed: %w", err)
 	}
 
 	archiveDir, err := findSlackdumpDir(tmpDir)
 	if err != nil {
-		return "", fmt.Errorf("%w\nOutput: %s", err, output)
+		return "", err
 	}
 
 	return archiveDir, nil
@@ -81,16 +89,25 @@ func Archive(
 func FormatText(ctx context.Context, slackdumpPath, archiveDir string) (string, error) {
 	// #nosec G204 -- slackdumpPath comes from user configuration, not untrusted input
 	cmd := exec.CommandContext(ctx, slackdumpPath, "format", "text", archiveDir)
+	// Run in the parent directory so the zip file is created there
+	cmd.Dir = filepath.Dir(archiveDir)
 
-	output, err := cmd.CombinedOutput()
+	// Debug: show the command being run
+	fmt.Printf("EXECUTING: %s format text %s\n", slackdumpPath, archiveDir)
+
+	// Stream output in real-time so we can see which channel fails
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
 	if err != nil {
-		return "", fmt.Errorf("slackdump format text failed: %w\nOutput: %s", err, output)
+		return "", fmt.Errorf("slackdump format text failed: %w", err)
 	}
 
 	parentDir := filepath.Dir(archiveDir)
 	zipPath, err := findZipFile(parentDir)
 	if err != nil {
-		return "", fmt.Errorf("%w\nOutput: %s", err, output)
+		return "", err
 	}
 
 	return zipPath, nil
@@ -120,6 +137,12 @@ func ExtractAndProcess(zipPath, outputDir, date string, channelNames map[string]
 	return nil
 }
 
+// metadataFiles are slackdump output files that should be skipped (not channel exports).
+var metadataFiles = map[string]bool{
+	"channels.txt": true,
+	"users.txt":    true,
+}
+
 // extractAndRenameFile extracts a single file from the zip and renames it appropriately.
 func extractAndRenameFile(
 	f *zip.File,
@@ -131,8 +154,14 @@ func extractAndRenameFile(
 		return nil
 	}
 
-	// Extract channel ID from filename (e.g., "C123456.txt")
 	baseName := filepath.Base(f.Name)
+
+	// Skip slackdump metadata files
+	if metadataFiles[baseName] {
+		return nil
+	}
+
+	// Extract channel ID from filename (e.g., "C123456.txt")
 	channelID := strings.TrimSuffix(baseName, ".txt")
 
 	// Get channel name for filename
