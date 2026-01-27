@@ -685,9 +685,17 @@ func initStepVerify(cfg *config.Config, configPath string, authSkipped bool, wor
 					// Fetch users for DM name resolution
 					userIndex, _ := client.FetchUsers(ctx)
 
+					// Set up external user cache for Slack Connect users
+					cache := slack.NewUserCache(slack.DefaultCachePath())
+					_ = cache.Load() // Ignore error - verification only
+
+					resolver := slack.NewUserResolver(userIndex, cache, client)
+
 					// Fetch channels
-					chans, err := client.GetActiveChannelsWithUsers(ctx, time.Time{}, userIndex)
+					chans, err := client.GetActiveChannelsWithResolver(ctx, time.Time{}, resolver)
 					if err == nil {
+						// Save cache after successful fetch
+						_ = cache.Save()
 						fmt.Printf("✓ Connected to workspace: %s\n", workspace)
 						fmt.Printf("✓ Found %d channels", len(chans))
 
