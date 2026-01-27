@@ -112,6 +112,14 @@ type UsersListResponse struct {
 	} `json:"response_metadata"`
 }
 
+// UserInfoResponse is the response from the Slack users.info API.
+// Used to fetch individual user details, especially for external Slack Connect users.
+type UserInfoResponse struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+	User  User   `json:"user"`
+}
+
 // UserIndex provides O(1) lookup of users by ID.
 type UserIndex map[string]*User
 
