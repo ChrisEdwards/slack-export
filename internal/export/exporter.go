@@ -118,6 +118,10 @@ func (e *Exporter) ExportDate(ctx context.Context, date string) error {
 		return nil
 	}
 
+	// Filter out channels created after the export date range
+	// (slackdump panics on channels that didn't exist during the target period)
+	filtered = filterByCreationDate(filtered, end)
+
 	fmt.Printf("Exporting %d channels for %s\n", len(filtered), date)
 
 	ids, names := buildChannelMaps(filtered)
@@ -141,6 +145,26 @@ func (e *Exporter) ExportDate(ctx context.Context, date string) error {
 	return nil
 }
 
+// filterByCreationDate removes channels created after the cutoff time.
+// This prevents slackdump from crashing on channels that didn't exist during the export period.
+func filterByCreationDate(chans []slack.Channel, cutoff time.Time) []slack.Channel {
+	result := make([]slack.Channel, 0, len(chans))
+	for _, ch := range chans {
+		// Include if Created is zero (IMs don't have creation dates) or before/at cutoff
+		if ch.Created.IsZero() || !ch.Created.After(cutoff) {
+			result = append(result, ch)
+		}
+	}
+	return result
+}
+
+// cleanupTempDir removes the temporary directory created by Archive.
+func cleanupTempDir(archiveDir string) {
+	if archiveDir != "" {
+		_ = os.RemoveAll(filepath.Dir(archiveDir))
+	}
+}
+
 // buildChannelMaps builds a list of channel IDs and a map of ID to name.
 func buildChannelMaps(chans []slack.Channel) ([]string, map[string]string) {
 	ids := make([]string, 0, len(chans))
@@ -150,13 +174,6 @@ func buildChannelMaps(chans []slack.Channel) ([]string, map[string]string) {
 		names[ch.ID] = ch.Name
 	}
 	return ids, names
-}
-
-// cleanupTempDir removes the temporary directory created by Archive.
-func cleanupTempDir(archiveDir string) {
-	if archiveDir != "" {
-		_ = os.RemoveAll(filepath.Dir(archiveDir))
-	}
 }
 
 // ExportRange exports Slack messages for all dates in a range.
