@@ -99,7 +99,7 @@ slack-export export --from 2025-01-01 --to 2025-01-15
 
 ### Configuring channels
 
-By default, all channels are exported. To see which channels will be processed:
+By default, all channels you're a member of are exported. To see which channels will be processed:
 
 ```bash
 slack-export channels
@@ -114,16 +114,19 @@ slack-export channels --since 2025-01-20
 To change which channels are exported, edit `~/.config/slack-export/slack-export.yaml`:
 
 ```yaml
-# Only export these channels (glob patterns, empty = all)
 include:
-  - "engineering-*"
+  - "engineering-*"    # glob pattern for channels you're a member of
   - "team-*"
+  - "C01ABC123DE"      # channel ID for a channel you're NOT a member of
 
-# Never export these channels
 exclude:
-  - "*-alerts"
+  - "*-alerts"         # channel name or ID works for excludes
   - "bot-*"
 ```
+
+**Including channels you're not a member of:** Use the channel ID (e.g., `C01ABC123DE`), not the name. Find the channel ID in Slack by opening the channel, clicking the channel name, and scrolling to the bottom of the "About" tab.
+
+**Excluding channels:** Use either the channel name or ID. Names only work for channels you're a member of.
 
 After editing, run `slack-export channels` again to verify your changes.
 
