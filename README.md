@@ -15,8 +15,10 @@ A CLI tool that exports Slack channel logs to dated markdown files. It uses the 
 ## Quick Start
 
 ```bash
-# Install
-go install github.com/chrisedwards/slack-export/cmd/slack-export@latest
+# Download and extract (macOS Apple Silicon example)
+curl -LO https://github.com/ChrisEdwards/slack-export/releases/latest/download/slack-export-v0.1.0-darwin-arm64.tar.gz
+tar -xzf slack-export-v0.1.0-darwin-arm64.tar.gz
+sudo mv slack-export slackdump /usr/local/bin/
 
 # Run guided setup
 slack-export init
@@ -30,30 +32,47 @@ slack-export sync
 
 ## Prerequisites
 
-1. **Go 1.21+** - for building from source
-2. **slackdump** - must be installed and authenticated
-   ```bash
-   go install github.com/rusq/slackdump/v3/cmd/slackdump@latest
-   slackdump auth
-   ```
-3. **Slack workspace access** - you must be a member of the workspace you want to export
+1. **Slack workspace access** - you must be a member of the workspace you want to export
 
 ## Installation
 
-### From source
+### From Release (Recommended)
+
+Download the appropriate archive for your platform from [Releases](https://github.com/ChrisEdwards/slack-export/releases):
+
+| Platform | File |
+|----------|------|
+| macOS (Apple Silicon) | `slack-export-vX.X.X-darwin-arm64.tar.gz` |
+| macOS (Intel) | `slack-export-vX.X.X-darwin-amd64.tar.gz` |
+| Linux (x86_64) | `slack-export-vX.X.X-linux-amd64.tar.gz` |
+| Linux (ARM64) | `slack-export-vX.X.X-linux-arm64.tar.gz` |
+| Windows | `slack-export-vX.X.X-windows-amd64.zip` |
+
+Extract and install both binaries:
+
+```bash
+# macOS/Linux
+tar -xzf slack-export-*.tar.gz
+sudo mv slack-export slackdump /usr/local/bin/
+
+# Windows (PowerShell)
+Expand-Archive slack-export-*.zip -DestinationPath .
+# Move slack-export.exe and slackdump.exe to a directory in your PATH
+```
+
+The release includes both `slack-export` and `slackdump` bundled together.
+
+### From Source
+
+Requires Go 1.21+ and a separate slackdump installation:
 
 ```bash
 git clone https://github.com/chrisedwards/slack-export.git
 cd slack-export
 make build
-```
 
-This creates a `slack-export` binary in the current directory.
-
-### Using go install
-
-```bash
-go install github.com/chrisedwards/slack-export/cmd/slack-export@latest
+# Also install slackdump separately
+go install github.com/rusq/slackdump/v3/cmd/slackdump@latest
 ```
 
 ## Getting Started
@@ -95,9 +114,6 @@ exclude:
   - "*-alerts"
   - "*-notifications"
   - "bot-*"
-
-# Path to slackdump binary (optional, defaults to PATH lookup)
-slackdump_path: /usr/local/bin/slackdump
 ```
 
 ### Configuration Options
@@ -108,7 +124,6 @@ slackdump_path: /usr/local/bin/slackdump
 | `timezone` | `America/New_York` | Timezone for date boundary calculations |
 | `include` | `[]` | Glob patterns for channels to include (empty = all) |
 | `exclude` | `[]` | Glob patterns for channels to exclude |
-| `slackdump_path` | _(PATH lookup)_ | Explicit path to slackdump binary |
 
 ### Environment Variables
 
