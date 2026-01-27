@@ -272,3 +272,39 @@ Fight entropy. Leave the codebase better than you found it.
 
 ## Slackdump
 You have access to the slackdump codebase at `../slackdump`
+
+---
+
+## Commit message format
+
+Follow this style: type(scope): brief description, then detailed explanation.
+
+Generate commit messages following these examples:
+
+**Example 1:**
+Input: Added user authentication with JWT tokens
+Output:
+```
+feat(auth): implement JWT-based authentication
+
+Add login endpoint and token validation middleware
+```
+
+**Example 2:**
+Input: Fixed bug where dates displayed incorrectly in reports
+Output:
+```
+fix(reports): correct date formatting in timezone conversion
+
+Use UTC timestamps consistently across report generation
+```
+
+**Example 3:**
+Input: Updated dependencies and refactored error handling
+Output:
+```
+chore: update dependencies and refactor error handling
+
+- Upgrade lodash to 4.17.21
+- Standardize error response format across endpoints
+```
