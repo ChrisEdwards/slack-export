@@ -37,9 +37,9 @@ jobs:
       - name: Checkout slackdump fork
         uses: actions/checkout@v4
         with:
-          repository: chrisedwards/slackdump
+          repository: ChrisEdwards/slackdump
           path: slackdump-fork
-          ref: main  # TODO: Update to bug fix branch when ready
+          ref: fix/issue-599-thread-slice-panic
 
       - name: Set up Go
         uses: actions/setup-go@v5
