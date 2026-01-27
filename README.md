@@ -15,18 +15,10 @@ A CLI tool that exports Slack channel logs to dated markdown files. It uses the 
 ## Quick Start
 
 ```bash
-# Install (auto-detects your platform)
 curl -fsSL https://raw.githubusercontent.com/ChrisEdwards/slack-export/main/install.sh | sh
-
-# Authenticate with Slack
-slackdump auth
-
-# Run guided setup
-slack-export init
-
-# Export today's messages
-slack-export sync
 ```
+
+The installer auto-detects your platform and tells you what to do next.
 
 ## Prerequisites
 
@@ -40,7 +32,7 @@ slack-export sync
 curl -fsSL https://raw.githubusercontent.com/ChrisEdwards/slack-export/main/install.sh | sh
 ```
 
-This auto-detects your platform and installs both `slack-export` and `slackdump` to `~/.local/bin`.
+This auto-detects your platform and installs both `slack-export` and `slackdump` to `~/.local/bin`. Run the same command to upgrade to the latest version.
 
 To install to a different directory:
 ```bash
