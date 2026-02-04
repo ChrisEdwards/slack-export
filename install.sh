@@ -121,7 +121,7 @@ main() {
         esac
 
         echo "Next steps:"
-        echo "  1. Authenticate with Slack:  slackdump auth"
+        echo "  1. Authenticate with Slack:  slackdump workspace new <workspace-url>"
         echo "  2. Run setup wizard:         slack-export init"
         echo "  3. Export your messages:     slack-export sync"
     fi
