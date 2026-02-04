@@ -25,7 +25,7 @@ import (
 
 // Version information, injected at build time via ldflags.
 var (
-	Version   = "dev"
+	Version   = "0.2.0"
 	Build     = "unknown"
 	BuildTime = "unknown"
 )
