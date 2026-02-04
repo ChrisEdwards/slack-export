@@ -120,10 +120,25 @@ var testExeDir string
 
 // FindSlackdump locates the slackdump binary.
 // Priority order:
-// 1. Bundled binary next to the executable
-// 2. System PATH (fallback for development)
+// 1. System PATH if version >= MinSlackdumpVersion
+// 2. Bundled binary next to the executable
 func FindSlackdump() (string, error) {
-	// Try bundled binary first
+	// Try system PATH first, check version
+	if path, err := exec.LookPath("slackdump"); err == nil {
+		version, verr := SlackdumpVersion(path)
+		if verr == nil {
+			cmp, cerr := CompareVersions(version, MinSlackdumpVersion)
+			if cerr == nil && cmp >= 0 {
+				return path, nil
+			}
+			// Version is below minimum, fall back to bundled
+			fmt.Printf("System slackdump version %s is below minimum %s, using bundled binary\n",
+				version, MinSlackdumpVersion)
+		}
+		// Version check failed (unknown or parse error), fall back to bundled
+	}
+
+	// Try bundled binary
 	var exeDir string
 	if testExeDir != "" {
 		exeDir = testExeDir
@@ -137,12 +152,7 @@ func FindSlackdump() (string, error) {
 		}
 	}
 
-	// Fall back to PATH
-	path, err := exec.LookPath("slackdump")
-	if err != nil {
-		return "", errors.New("slackdump not found - ensure it's installed alongside slack-export")
-	}
-	return path, nil
+	return "", errors.New("slackdump not found - ensure it's installed alongside slack-export")
 }
 
 // Archive runs slackdump archive with the given channels and time range.

@@ -41,7 +41,7 @@ func TestFindSlackdump_BundledBinaryNotFound(t *testing.T) {
 	}
 }
 
-func TestFindSlackdump_PrefersBundledOverPATH(t *testing.T) {
+func TestFindSlackdump_UsesBundledWhenPathVersionCheckFails(t *testing.T) {
 	// Create bundled binary
 	bundledDir := t.TempDir()
 	binaryName := "slackdump"
@@ -53,7 +53,7 @@ func TestFindSlackdump_PrefersBundledOverPATH(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create PATH binary
+	// Create PATH binary that doesn't report a valid version (not executable script)
 	pathDir := t.TempDir()
 	pathBin := filepath.Join(pathDir, binaryName)
 	if err := os.WriteFile(pathBin, []byte("path"), 0755); err != nil {
@@ -70,23 +70,27 @@ func TestFindSlackdump_PrefersBundledOverPATH(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindSlackdump() error = %v", err)
 	}
+	// PATH binary can't report version, so falls back to bundled
 	if got != bundledPath {
-		t.Errorf("FindSlackdump() = %q, want bundled %q (not PATH)", got, bundledPath)
+		t.Errorf("FindSlackdump() = %q, want bundled %q (PATH version check failed)", got, bundledPath)
 	}
 }
 
-func TestFindSlackdump_FallsBackToPATH(t *testing.T) {
-	// Empty bundled directory
+func TestFindSlackdump_UsesPathWhenVersionSufficientAndNoBundled(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts not supported on Windows")
+	}
+
+	// Empty bundled directory (no bundled binary)
 	bundledDir := t.TempDir()
 
-	// Create PATH binary
+	// Create PATH binary with sufficient version
 	pathDir := t.TempDir()
-	binaryName := "slackdump"
-	if runtime.GOOS == "windows" {
-		binaryName = "slackdump.exe"
-	}
-	pathBin := filepath.Join(pathDir, binaryName)
-	if err := os.WriteFile(pathBin, []byte("path"), 0755); err != nil {
+	pathBin := filepath.Join(pathDir, "slackdump")
+	script := `#!/bin/sh
+echo "Slackdump 3.2.0 (commit: test1234) built on: 2024-01-01"
+`
+	if err := os.WriteFile(pathBin, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", pathDir)
@@ -102,5 +106,116 @@ func TestFindSlackdump_FallsBackToPATH(t *testing.T) {
 	}
 	if got != pathBin {
 		t.Errorf("FindSlackdump() = %q, want PATH %q", got, pathBin)
+	}
+}
+
+func TestFindSlackdump_SystemVersionSufficient(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts not supported on Windows")
+	}
+
+	// Create a mock slackdump that reports version 3.2.0 (above minimum)
+	pathDir := t.TempDir()
+	mockBin := filepath.Join(pathDir, "slackdump")
+	script := `#!/bin/sh
+echo "Slackdump 3.2.0 (commit: test1234) built on: 2024-01-01"
+`
+	if err := os.WriteFile(mockBin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create bundled binary (should NOT be used)
+	bundledDir := t.TempDir()
+	bundledBin := filepath.Join(bundledDir, "slackdump")
+	if err := os.WriteFile(bundledBin, []byte("#!/bin/sh\necho bundled"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldExeDir := testExeDir
+	testExeDir = bundledDir
+	defer func() { testExeDir = oldExeDir }()
+
+	t.Setenv("PATH", pathDir)
+
+	got, err := FindSlackdump()
+	if err != nil {
+		t.Fatalf("FindSlackdump() error = %v", err)
+	}
+	if got != mockBin {
+		t.Errorf("FindSlackdump() = %q, want system PATH %q (version sufficient)", got, mockBin)
+	}
+}
+
+func TestFindSlackdump_SystemVersionInsufficient(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts not supported on Windows")
+	}
+
+	// Create a mock slackdump that reports version 3.1.12 (below minimum)
+	pathDir := t.TempDir()
+	mockBin := filepath.Join(pathDir, "slackdump")
+	script := `#!/bin/sh
+echo "Slackdump 3.1.12 (commit: old12345) built on: 2023-01-01"
+`
+	if err := os.WriteFile(mockBin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create bundled binary (should be used as fallback)
+	bundledDir := t.TempDir()
+	bundledBin := filepath.Join(bundledDir, "slackdump")
+	if err := os.WriteFile(bundledBin, []byte("#!/bin/sh\necho bundled"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldExeDir := testExeDir
+	testExeDir = bundledDir
+	defer func() { testExeDir = oldExeDir }()
+
+	t.Setenv("PATH", pathDir)
+
+	got, err := FindSlackdump()
+	if err != nil {
+		t.Fatalf("FindSlackdump() error = %v", err)
+	}
+	if got != bundledBin {
+		t.Errorf("FindSlackdump() = %q, want bundled %q (system version too old)", got, bundledBin)
+	}
+}
+
+func TestFindSlackdump_SystemVersionUnknown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts not supported on Windows")
+	}
+
+	// Create a mock slackdump that reports unknown version (dev build)
+	pathDir := t.TempDir()
+	mockBin := filepath.Join(pathDir, "slackdump")
+	script := `#!/bin/sh
+echo "Slackdump unknown (commit: unknown) built on: unknown"
+`
+	if err := os.WriteFile(mockBin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create bundled binary (should be used as fallback)
+	bundledDir := t.TempDir()
+	bundledBin := filepath.Join(bundledDir, "slackdump")
+	if err := os.WriteFile(bundledBin, []byte("#!/bin/sh\necho bundled"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldExeDir := testExeDir
+	testExeDir = bundledDir
+	defer func() { testExeDir = oldExeDir }()
+
+	t.Setenv("PATH", pathDir)
+
+	got, err := FindSlackdump()
+	if err != nil {
+		t.Fatalf("FindSlackdump() error = %v", err)
+	}
+	if got != bundledBin {
+		t.Errorf("FindSlackdump() = %q, want bundled %q (system version unknown)", got, bundledBin)
 	}
 }

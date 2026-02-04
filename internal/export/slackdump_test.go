@@ -5,16 +5,24 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestFindSlackdump_FromPATH(t *testing.T) {
-	// Create a temp dir with a fake slackdump binary
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts not supported on Windows")
+	}
+
+	// Create a temp dir with a mock slackdump that reports sufficient version
 	tmpDir := t.TempDir()
 	fakeBin := filepath.Join(tmpDir, "slackdump")
-	if err := os.WriteFile(fakeBin, []byte("fake"), 0755); err != nil {
+	script := `#!/bin/sh
+echo "Slackdump 3.2.0 (commit: test1234) built on: 2024-01-01"
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
 
