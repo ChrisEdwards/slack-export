@@ -318,7 +318,7 @@ The user cache stores information about external Slack Connect users to avoid re
 
 3. **Filtering**: Applies include/exclude glob patterns to the channel list.
 
-4. **Export**: Calls slackdump to archive messages for the specified time range.
+4. **Export**: Calls slackdump to archive messages for the specified time range. If you have slackdump >= 3.1.13 installed on your system, slack-export uses it automatically. Otherwise, it uses the bundled version.
 
 5. **Format**: Uses slackdump's `convert` command to transform the archive into readable text.
 
