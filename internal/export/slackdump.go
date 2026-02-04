@@ -10,11 +10,55 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/chrisedwards/slack-export/internal/slack"
 )
+
+// MinSlackdumpVersion is the minimum version that has the bug fix from PR #444.
+const MinSlackdumpVersion = "3.1.13"
+
+// CompareVersions compares two semver strings (X.Y.Z format).
+// Returns -1 if a < b, 0 if equal, 1 if a > b.
+// Returns error if either version is malformed.
+func CompareVersions(a, b string) (int, error) {
+	parseVersion := func(v string) ([3]int, error) {
+		parts := strings.Split(v, ".")
+		if len(parts) != 3 {
+			return [3]int{}, fmt.Errorf("invalid version format: %q (expected X.Y.Z)", v)
+		}
+		var result [3]int
+		for i, p := range parts {
+			n, err := strconv.Atoi(p)
+			if err != nil {
+				return [3]int{}, fmt.Errorf("invalid version segment %q: %w", p, err)
+			}
+			result[i] = n
+		}
+		return result, nil
+	}
+
+	va, err := parseVersion(a)
+	if err != nil {
+		return 0, err
+	}
+	vb, err := parseVersion(b)
+	if err != nil {
+		return 0, err
+	}
+
+	for i := 0; i < 3; i++ {
+		if va[i] < vb[i] {
+			return -1, nil
+		}
+		if va[i] > vb[i] {
+			return 1, nil
+		}
+	}
+	return 0, nil
+}
 
 // findSlackdumpInDir looks for a slackdump binary in the given directory.
 // Returns the full path if found, error otherwise.

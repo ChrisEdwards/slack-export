@@ -454,3 +454,40 @@ func TestExtractAndProcess_EmptyChannelName(t *testing.T) {
 		t.Errorf("expected file at %s (fallback to ID when name is empty)", expectedPath)
 	}
 }
+
+func TestCompareVersions(t *testing.T) {
+	tests := []struct {
+		name    string
+		a       string
+		b       string
+		want    int
+		wantErr bool
+	}{
+		{"equal", "3.1.13", "3.1.13", 0, false},
+		{"a greater patch", "3.1.14", "3.1.13", 1, false},
+		{"a less patch", "3.1.12", "3.1.13", -1, false},
+		{"a greater minor", "3.2.0", "3.1.13", 1, false},
+		{"a less minor", "3.0.0", "3.1.13", -1, false},
+		{"a greater major", "4.0.0", "3.1.13", 1, false},
+		{"a less major", "2.9.99", "3.1.13", -1, false},
+		{"malformed a", "abc", "3.1.13", 0, true},
+		{"malformed b", "3.1.13", "xyz", 0, true},
+		{"empty a", "", "3.1.13", 0, true},
+		{"empty b", "3.1.13", "", 0, true},
+		{"missing patch", "3.1", "3.1.13", 0, true},
+		{"too many segments", "3.1.13.4", "3.1.13", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := CompareVersions(tt.a, tt.b)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CompareVersions() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("CompareVersions() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
