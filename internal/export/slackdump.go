@@ -20,6 +20,45 @@ import (
 // MinSlackdumpVersion is the minimum version that has the bug fix from PR #444.
 const MinSlackdumpVersion = "3.1.13"
 
+// parseSlackdumpVersion extracts the version from slackdump version output.
+// Expected format: "Slackdump 3.1.13 (commit: abc12345) built on: 2024-01-15"
+func parseSlackdumpVersion(output string) (string, error) {
+	// Look for "Slackdump " prefix
+	const prefix = "Slackdump "
+	if !strings.HasPrefix(output, prefix) {
+		return "", fmt.Errorf("failed to parse slackdump version: unexpected output format")
+	}
+
+	// Extract version between "Slackdump " and " ("
+	rest := output[len(prefix):]
+	idx := strings.Index(rest, " (")
+	if idx == -1 {
+		return "", fmt.Errorf("failed to parse slackdump version: missing version delimiter")
+	}
+
+	version := rest[:idx]
+	if version == "unknown" {
+		return "", fmt.Errorf("slackdump version is unknown (development build)")
+	}
+
+	return version, nil
+}
+
+// SlackdumpVersion runs slackdump version and returns the parsed version string.
+func SlackdumpVersion(binaryPath string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// #nosec G204 -- binaryPath comes from FindSlackdump, not untrusted input
+	cmd := exec.CommandContext(ctx, binaryPath, "version")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to run slackdump version: %w", err)
+	}
+
+	return parseSlackdumpVersion(strings.TrimSpace(string(output)))
+}
+
 // CompareVersions compares two semver strings (X.Y.Z format).
 // Returns -1 if a < b, 0 if equal, 1 if a > b.
 // Returns error if either version is malformed.

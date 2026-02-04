@@ -491,3 +491,61 @@ func TestCompareVersions(t *testing.T) {
 		})
 	}
 }
+
+func TestParseSlackdumpVersion(t *testing.T) {
+	tests := []struct {
+		name        string
+		output      string
+		want        string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:   "valid version",
+			output: "Slackdump 3.1.13 (commit: abc12345) built on: 2024-01-15",
+			want:   "3.1.13",
+		},
+		{
+			name:   "version with v prefix in output",
+			output: "Slackdump 3.2.0 (commit: def67890) built on: 2024-02-01",
+			want:   "3.2.0",
+		},
+		{
+			name:        "unknown version",
+			output:      "Slackdump unknown (commit: unknown) built on: unknown",
+			wantErr:     true,
+			errContains: "unknown",
+		},
+		{
+			name:        "malformed output",
+			output:      "not slackdump output",
+			wantErr:     true,
+			errContains: "parse",
+		},
+		{
+			name:        "empty output",
+			output:      "",
+			wantErr:     true,
+			errContains: "parse",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseSlackdumpVersion(tt.output)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseSlackdumpVersion() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && tt.errContains != "" {
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("error %q should contain %q", err.Error(), tt.errContains)
+				}
+				return
+			}
+			if got != tt.want {
+				t.Errorf("parseSlackdumpVersion() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
