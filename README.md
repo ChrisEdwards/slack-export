@@ -50,15 +50,10 @@ See [Alternative Installation](#alternative-installation) for manual download or
 ### 1. Authenticate with Slack
 
 ```bash
-slackdump workspace new <workspace-url>
+slackdump workspace wiz
 ```
 
-For example:
-```bash
-slackdump workspace new https://mycompany.slack.com
-```
-
-This opens a browser to authenticate with your Slack workspace. Your credentials are stored locally and encrypted. For Enterprise Grid workspaces, use the individual workspace URL (e.g., `team.slack.com`), not the enterprise URL.
+This runs the workspace setup wizard, which opens a browser to authenticate with your Slack workspace. Your credentials are stored locally and encrypted. For Enterprise Grid workspaces, use the individual workspace URL (e.g., `team.slack.com`), not the enterprise URL.
 
 ### 2. Run the setup wizard
 
@@ -328,11 +323,11 @@ The user cache stores information about external Slack Connect users to avoid re
 
 ### "Slackdump credentials not found"
 
-Run `slackdump workspace new <workspace-url>` to authenticate with your Slack workspace.
+Run `slackdump workspace wiz` to authenticate with your Slack workspace.
 
 ### "Failed to decrypt credentials"
 
-Credentials are machine-specific. If you authenticated on a different machine, run `slackdump workspace new <workspace-url>` again.
+Credentials are machine-specific. If you authenticated on a different machine, run `slackdump workspace wiz` again.
 
 ### "No active channels found"
 
