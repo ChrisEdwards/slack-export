@@ -40,7 +40,7 @@ This auto-detects your platform and installs both `slack-export` and `slackdump`
 
 To install to a different directory:
 ```bash
-INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/ChrisEdwards/slack-export/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/ChrisEdwards/slack-export/main/install.sh | INSTALL_DIR=/usr/local/bin sh
 ```
 
 See [Alternative Installation](#alternative-installation) for manual download or building from source.

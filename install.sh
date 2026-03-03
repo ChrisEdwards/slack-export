@@ -3,6 +3,7 @@ set -e
 
 # slack-export installer (works for both fresh install and upgrade)
 # Usage: curl -fsSL https://raw.githubusercontent.com/ChrisEdwards/slack-export/main/install.sh | sh
+# Custom dir: curl -fsSL ... | INSTALL_DIR=/path/to/dir sh
 
 REPO="ChrisEdwards/slack-export"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
