@@ -3,6 +3,7 @@ package export
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -177,8 +178,9 @@ func buildChannelMaps(chans []slack.Channel) ([]string, map[string]string) {
 }
 
 // ExportRange exports Slack messages for all dates in a range.
-// It continues on single-day errors rather than stopping, so a transient
-// error doesn't abort a multi-day sync.
+// It continues on single-day errors so a transient error doesn't prevent
+// later dates from exporting, but returns an error after the range if any
+// individual date failed.
 func (e *Exporter) ExportRange(ctx context.Context, from, to string) error {
 	loc, err := time.LoadLocation(e.cfg.Timezone)
 	if err != nil {
@@ -199,13 +201,19 @@ func (e *Exporter) ExportRange(ctx context.Context, from, to string) error {
 		return fmt.Errorf("from date %s cannot be after to date %s", from, to)
 	}
 
+	var failures []error
 	for d := fromDate; !d.After(toDate); d = d.AddDate(0, 0, 1) {
 		date := d.Format("2006-01-02")
 		fmt.Printf("\n=== Exporting %s ===\n", date)
 
 		if err := e.ExportDate(ctx, date); err != nil {
 			fmt.Printf("Error exporting %s: %v\n", date, err)
+			failures = append(failures, fmt.Errorf("%s: %w", date, err))
 		}
+	}
+
+	if len(failures) > 0 {
+		return fmt.Errorf("%d date export(s) failed: %w", len(failures), errors.Join(failures...))
 	}
 
 	return nil

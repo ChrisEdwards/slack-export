@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestExportCmd_Flags(t *testing.T) {
@@ -247,6 +248,50 @@ func TestFindLastExportDate_MixedContent(t *testing.T) {
 	}
 	if date != "2026-01-22" {
 		t.Errorf("findLastExportDate() = %q, want 2026-01-22", date)
+	}
+}
+
+func TestSyncStartDate_FirstRunStartsToday(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "2026-01-21__general.txt"), []byte("legacy"), 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	loc := time.FixedZone("test", -5*60*60)
+	now := time.Date(2026, 1, 22, 10, 0, 0, 0, time.UTC)
+
+	date, hadPrevious, err := syncStartDate(tmpDir, loc, now)
+	if err != nil {
+		t.Fatalf("syncStartDate() error = %v", err)
+	}
+	if hadPrevious {
+		t.Error("syncStartDate() should report no previous dated exports")
+	}
+	if date != "2026-01-22" {
+		t.Errorf("syncStartDate() = %q, want today's local date 2026-01-22", date)
+	}
+}
+
+func TestSyncStartDate_UsesLatestDatedExport(t *testing.T) {
+	tmpDir := t.TempDir()
+	for _, date := range []string{"2026-01-20", "2026-01-22", "2026-01-21"} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, date), 0750); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	loc := time.FixedZone("test", -5*60*60)
+	now := time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC)
+
+	date, hadPrevious, err := syncStartDate(tmpDir, loc, now)
+	if err != nil {
+		t.Fatalf("syncStartDate() error = %v", err)
+	}
+	if !hadPrevious {
+		t.Error("syncStartDate() should report previous dated exports")
+	}
+	if date != "2026-01-22" {
+		t.Errorf("syncStartDate() = %q, want latest dated export 2026-01-22", date)
 	}
 }
 

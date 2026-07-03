@@ -536,7 +536,7 @@ func TestExportRange_MultiDay(t *testing.T) {
 	}
 }
 
-func TestExportRange_ContinuesOnError(t *testing.T) {
+func TestExportRange_ContinuesOnErrorAndReturnsFailure(t *testing.T) {
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/users.list" {
@@ -576,8 +576,13 @@ func TestExportRange_ContinuesOnError(t *testing.T) {
 	}
 
 	err := e.ExportRange(context.Background(), "2026-01-22", "2026-01-24")
-	if err != nil {
-		t.Errorf("ExportRange() should continue on single-day errors: %v", err)
+	if err == nil {
+		t.Fatal("ExportRange() should return an error after any single-day failure")
+	}
+	for _, want := range []string{"1 date export(s) failed", "2026-01-23", "getting active channels"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("ExportRange() error = %q, want it to contain %q", err.Error(), want)
+		}
 	}
 
 	// Should have processed all 3 days despite error on day 2

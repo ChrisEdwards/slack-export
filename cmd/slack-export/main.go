@@ -69,7 +69,7 @@ var syncCmd = &cobra.Command{
 
 The command scans the output directory for dated folders (YYYY-MM-DD pattern),
 finds the most recent date, and re-exports from that date through today.
-If no previous exports exist, it defaults to yesterday.
+If no previous exports exist, it starts from today.
 
 The last export date is re-exported because it may have been incomplete.`,
 	RunE: runSync,
@@ -194,20 +194,20 @@ func runSync(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("invalid timezone: %w", err)
 	}
 
-	lastDate, err := findLastExportDate(cfg.OutputDir)
+	now := time.Now()
+	startDate, hadPrevious, err := syncStartDate(cfg.OutputDir, loc, now)
 	if err != nil {
 		return fmt.Errorf("scanning output directory: %w", err)
 	}
 
-	if lastDate == "" {
-		lastDate = time.Now().In(loc).AddDate(0, 0, -1).Format("2006-01-02")
-		fmt.Printf("No previous exports found, starting from %s\n", lastDate)
+	if !hadPrevious {
+		fmt.Printf("No previous exports found, starting from %s\n", startDate)
 	} else {
-		fmt.Printf("Last export: %s\n", lastDate)
+		fmt.Printf("Last export: %s\n", startDate)
 	}
 
-	today := time.Now().In(loc).Format("2006-01-02")
-	fmt.Printf("Syncing from %s to %s\n", lastDate, today)
+	today := now.In(loc).Format("2006-01-02")
+	fmt.Printf("Syncing from %s to %s\n", startDate, today)
 
 	exporter, err := export.NewExporter(cfg)
 	if err != nil {
@@ -217,7 +217,7 @@ func runSync(_ *cobra.Command, _ []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	return exporter.ExportRange(ctx, lastDate, today)
+	return exporter.ExportRange(ctx, startDate, today)
 }
 
 var datePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
@@ -244,6 +244,17 @@ func findLastExportDate(dir string) (string, error) {
 
 	sort.Strings(dates)
 	return dates[len(dates)-1], nil
+}
+
+func syncStartDate(outputDir string, loc *time.Location, now time.Time) (string, bool, error) {
+	lastDate, err := findLastExportDate(outputDir)
+	if err != nil {
+		return "", false, err
+	}
+	if lastDate != "" {
+		return lastDate, true, nil
+	}
+	return now.In(loc).Format("2006-01-02"), false, nil
 }
 
 func runChannels(cmd *cobra.Command, _ []string) error {
