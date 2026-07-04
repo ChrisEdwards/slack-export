@@ -72,6 +72,53 @@ func TestRenderSourceRange_WritesOnlyWhenContentChanges(t *testing.T) {
 	}
 }
 
+func TestRenderSourceRange_UsesChannelNameOverrideWhenArchiveNameMissing(t *testing.T) {
+	src := memoryArchiveSource{
+		channels: []rslack.Channel{{
+			GroupConversation: rslack.GroupConversation{
+				Conversation: rslack.Conversation{ID: "C123"},
+			},
+		}},
+		users: []rslack.User{{ID: "U1", Name: "alice", RealName: "Alice"}},
+		messages: map[string][]rslack.Message{
+			"C123": {
+				{Msg: rslack.Msg{
+					Type:      "message",
+					User:      "U1",
+					Text:      "Readable filename",
+					Timestamp: "1783094460.000000",
+				}},
+			},
+		},
+	}
+	outputDir := t.TempDir()
+
+	writes, err := RenderSourceRangeWithChannelNames(
+		context.Background(),
+		src,
+		outputDir,
+		"2026-07-03",
+		"2026-07-03",
+		"America/Chicago",
+		map[string]string{"C123": "engineering"},
+	)
+	if err != nil {
+		t.Fatalf("RenderSourceRangeWithChannelNames() error = %v", err)
+	}
+	if writes != 1 {
+		t.Fatalf("writes = %d, want 1", writes)
+	}
+
+	outPath := filepath.Join(outputDir, "2026-07-03", "2026-07-03-engineering.md")
+	if _, err := os.Stat(outPath); err != nil {
+		t.Fatalf("stat rendered file with channel name: %v", err)
+	}
+	idPath := filepath.Join(outputDir, "2026-07-03", "2026-07-03-C123.md")
+	if _, err := os.Stat(idPath); !os.IsNotExist(err) {
+		t.Fatalf("ID-named file should not be written, stat err = %v", err)
+	}
+}
+
 func (s memoryArchiveSource) Channels(context.Context) ([]rslack.Channel, error) {
 	return s.channels, nil
 }

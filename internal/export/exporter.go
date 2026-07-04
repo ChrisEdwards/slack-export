@@ -3,13 +3,10 @@ package export
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,7 +14,6 @@ import (
 	"github.com/chrisedwards/slack-export/internal/config"
 	"github.com/chrisedwards/slack-export/internal/slack"
 	"github.com/rusq/slackdump/v4/source"
-	_ "modernc.org/sqlite"
 )
 
 // Exporter orchestrates the export workflow for Slack channels.
@@ -178,6 +174,9 @@ func (e *Exporter) Sync(ctx context.Context, now time.Time) error {
 	} else if err := e.resumeArchive(ctx, archiveDir, tracked); err != nil {
 		return err
 	}
+	if err := saveChannelNames(archiveDir, tracked); err != nil {
+		return fmt.Errorf("saving channel names: %w", err)
+	}
 
 	from, to, err := e.renderWindow(now)
 	if err != nil {
@@ -305,48 +304,6 @@ func movedResumeChannelIDs(
 	return moved
 }
 
-func archiveCoverageStart(archiveDir string) (time.Time, error) {
-	db, err := sql.Open("sqlite", filepath.Join(archiveDir, source.DefaultDBFile))
-	if err != nil {
-		return time.Time{}, err
-	}
-	defer func() { _ = db.Close() }()
-
-	var raw sql.NullString
-	err = db.QueryRow(`
-		SELECT MIN(FROM_TS)
-		FROM SESSION
-		WHERE MODE = 'archive'
-		  AND FINISHED = 1
-		  AND FROM_TS IS NOT NULL
-	`).Scan(&raw)
-	if err != nil {
-		return time.Time{}, err
-	}
-	if !raw.Valid || strings.TrimSpace(raw.String) == "" {
-		return time.Time{}, nil
-	}
-	return parseArchiveTimestamp(raw.String)
-}
-
-func parseArchiveTimestamp(value string) (time.Time, error) {
-	value = strings.TrimSpace(value)
-	layouts := []string{
-		time.RFC3339Nano,
-		"2006-01-02 15:04:05.999999999 -0700 MST",
-		"2006-01-02 15:04:05 -0700 MST",
-	}
-	var lastErr error
-	for _, layout := range layouts {
-		parsed, err := time.Parse(layout, value)
-		if err == nil {
-			return parsed, nil
-		}
-		lastErr = err
-	}
-	return time.Time{}, fmt.Errorf("parsing archive timestamp %q: %w", value, lastErr)
-}
-
 func countsLatestByID(counts *slack.CountsResponse) map[string]time.Time {
 	result := make(map[string]time.Time)
 	add := func(snapshot slack.ChannelSnapshot) {
@@ -374,148 +331,6 @@ func laterSlackTS(a, b string) time.Time {
 		return bt
 	}
 	return at
-}
-
-func (e *Exporter) renderWindow(now time.Time) (string, string, error) {
-	loc, err := time.LoadLocation(e.cfg.Timezone)
-	if err != nil {
-		return "", "", fmt.Errorf("loading timezone: %w", err)
-	}
-	lookback, err := parseFriendlyDuration(e.cfg.Lookback)
-	if err != nil {
-		return "", "", fmt.Errorf("parsing lookback: %w", err)
-	}
-	days := int(lookback.Hours()/24) + 1
-	to := now.In(loc)
-	from := to.AddDate(0, 0, -days)
-	return from.Format("2006-01-02"), to.Format("2006-01-02"), nil
-}
-
-func (e *Exporter) seedDate(now time.Time) (string, error) {
-	if e.cfg.SeedDate != "" {
-		if _, _, err := GetDateBounds(e.cfg.SeedDate, e.cfg.Timezone); err != nil {
-			return "", fmt.Errorf("invalid seed_date: %w", err)
-		}
-		return e.cfg.SeedDate, nil
-	}
-	if date, err := findEarliestExportDate(e.cfg.OutputDir); err != nil {
-		return "", err
-	} else if date != "" {
-		return date, nil
-	}
-	loc, err := time.LoadLocation(e.cfg.Timezone)
-	if err != nil {
-		return "", fmt.Errorf("loading timezone: %w", err)
-	}
-	return now.In(loc).Format("2006-01-02"), nil
-}
-
-func expandPath(path string) (string, error) {
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("determining home directory: %w", err)
-		}
-		if path == "~" {
-			return home, nil
-		}
-		return filepath.Join(home, strings.TrimPrefix(path, "~/")), nil
-	}
-	return path, nil
-}
-
-func sanitizePathPart(value string) string {
-	value = strings.TrimSpace(strings.ToLower(value))
-	var b strings.Builder
-	for _, r := range value {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
-			b.WriteRune(r)
-		} else {
-			b.WriteByte('_')
-		}
-	}
-	if b.Len() == 0 {
-		return "workspace"
-	}
-	return b.String()
-}
-
-func archiveExists(archiveDir string) bool {
-	_, err := os.Stat(filepath.Join(archiveDir, source.DefaultDBFile))
-	return err == nil
-}
-
-var exportDateDirPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
-
-func findEarliestExportDate(dir string) (string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", err
-	}
-	var earliest string
-	for _, entry := range entries {
-		if !entry.IsDir() || !exportDateDirPattern.MatchString(entry.Name()) {
-			continue
-		}
-		if earliest == "" || entry.Name() < earliest {
-			earliest = entry.Name()
-		}
-	}
-	return earliest, nil
-}
-
-func parseFriendlyDuration(value string) (time.Duration, error) {
-	if value == "" {
-		return 0, nil
-	}
-	if days, ok, err := parseDayDuration(value); ok || err != nil {
-		return days, err
-	}
-	return time.ParseDuration(value)
-}
-
-func parseDayDuration(value string) (time.Duration, bool, error) {
-	if !strings.HasSuffix(value, "d") {
-		return 0, false, nil
-	}
-	n, err := strconv.Atoi(strings.TrimSuffix(value, "d"))
-	if err != nil {
-		return 0, true, err
-	}
-	return time.Duration(n) * 24 * time.Hour, true, nil
-}
-
-func fullSweepDue(archiveDir, interval string, now time.Time) bool {
-	duration, err := parseFriendlyDuration(interval)
-	if err != nil || duration == 0 {
-		return false
-	}
-	data, err := os.ReadFile(fullSweepPath(archiveDir))
-	if err != nil {
-		return true
-	}
-	last, err := time.Parse(time.RFC3339, strings.TrimSpace(string(data)))
-	if err != nil {
-		return true
-	}
-	return !now.Before(last.Add(duration))
-}
-
-func markFullSweep(archiveDir string, now time.Time) error {
-	if err := os.MkdirAll(archiveDir, 0750); err != nil {
-		return fmt.Errorf("creating archive metadata directory: %w", err)
-	}
-	if err := os.WriteFile(fullSweepPath(archiveDir), []byte(now.Format(time.RFC3339)), 0600); err != nil {
-		return fmt.Errorf("writing full sweep marker: %w", err)
-	}
-	return nil
-}
-
-func fullSweepPath(archiveDir string) string {
-	return filepath.Join(archiveDir, ".slack-export-last-full-sweep")
 }
 
 func channelIDs(chans []slack.Channel) []string {

@@ -55,7 +55,11 @@ func RenderArchiveRange(ctx context.Context, archiveDir, outputDir, from, to, ti
 	}
 	defer func() { _ = src.Close() }()
 
-	return RenderSourceRange(ctx, src, outputDir, from, to, timezone)
+	channelNames, err := loadChannelNames(archiveDir)
+	if err != nil {
+		return 0, fmt.Errorf("loading channel names: %w", err)
+	}
+	return RenderSourceRangeWithChannelNames(ctx, src, outputDir, from, to, timezone, channelNames)
 }
 
 // RenderSourceRange renders all channels from an already opened source.
@@ -66,6 +70,18 @@ func RenderSourceRange(
 	from string,
 	to string,
 	timezone string,
+) (int, error) {
+	return renderSourceRange(ctx, src, outputDir, from, to, timezone, nil)
+}
+
+func renderSourceRange(
+	ctx context.Context,
+	src ArchiveMessageSource,
+	outputDir string,
+	from string,
+	to string,
+	timezone string,
+	channelNames channelNameResolver,
 ) (int, error) {
 	channels, err := src.Channels(ctx)
 	if err != nil {
@@ -80,7 +96,7 @@ func RenderSourceRange(
 	writes := 0
 	for _, date := range dates {
 		for _, ch := range channels {
-			name := channelFileName(ch)
+			name := channelNames.fileName(ch)
 			content, err := RenderChannelDate(ctx, src, RenderRequest{
 				Date:        date,
 				Timezone:    timezone,
@@ -104,36 +120,6 @@ func RenderSourceRange(
 		}
 	}
 	return writes, nil
-}
-
-func datesInRange(from, to, timezone string) ([]string, error) {
-	loc, err := time.LoadLocation(timezone)
-	if err != nil {
-		return nil, fmt.Errorf("loading timezone: %w", err)
-	}
-	start, err := time.ParseInLocation("2006-01-02", from, loc)
-	if err != nil {
-		return nil, fmt.Errorf("parsing from date: %w", err)
-	}
-	end, err := time.ParseInLocation("2006-01-02", to, loc)
-	if err != nil {
-		return nil, fmt.Errorf("parsing to date: %w", err)
-	}
-	if start.After(end) {
-		return nil, fmt.Errorf("from date %s cannot be after to date %s", from, to)
-	}
-	var dates []string
-	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
-		dates = append(dates, d.Format("2006-01-02"))
-	}
-	return dates, nil
-}
-
-func channelFileName(ch rslack.Channel) string {
-	if ch.Name != "" {
-		return ch.Name
-	}
-	return ch.ID
 }
 
 func writeFileIfChanged(path string, content []byte) (bool, error) {
