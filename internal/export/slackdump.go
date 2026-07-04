@@ -191,7 +191,7 @@ func ResumeArchive(
 	ctx context.Context,
 	slackdumpPath string,
 	archiveDir string,
-	channelIDs []string,
+	entityArgs []string,
 	opts ResumeOptions,
 ) error {
 	args := []string{"resume", "-threads"}
@@ -208,7 +208,7 @@ func ResumeArchive(
 		args = append(args, "-dedupe")
 	}
 	args = append(args, archiveDir)
-	args = append(args, channelIDs...)
+	args = append(args, entityArgs...)
 
 	return runSlackdump(ctx, slackdumpPath, args, "slackdump resume failed")
 }

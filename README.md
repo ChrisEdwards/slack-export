@@ -147,6 +147,7 @@ archive_dir: ~/.local/share/slack-export/archive
 seed_date: ""                # YYYY-MM-DD; empty starts from existing output or today
 lookback: 7d                 # recent render window
 skip_stale_threads: 21d      # "" disables stale-thread skipping
+skip_stale_channels: 21d     # "" disables stale-channel skipping
 full_sweep_interval: 7d      # "" disables scheduled full sweeps
 ```
 

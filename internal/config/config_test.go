@@ -33,6 +33,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.SkipStaleThreads != "21d" {
 		t.Errorf("SkipStaleThreads = %q, want 21d", cfg.SkipStaleThreads)
 	}
+	if cfg.SkipStaleChannels != "21d" {
+		t.Errorf("SkipStaleChannels = %q, want 21d", cfg.SkipStaleChannels)
+	}
 	if cfg.FullSweepInterval != "7d" {
 		t.Errorf("FullSweepInterval = %q, want 7d", cfg.FullSweepInterval)
 	}
@@ -53,6 +56,7 @@ archive_dir: "/archives"
 seed_date: "2026-01-01"
 lookback: "3d"
 skip_stale_threads: ""
+skip_stale_channels: "10d"
 full_sweep_interval: "14d"
 `
 	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
@@ -87,6 +91,9 @@ full_sweep_interval: "14d"
 	}
 	if cfg.SkipStaleThreads != "" {
 		t.Errorf("SkipStaleThreads = %q, want empty override", cfg.SkipStaleThreads)
+	}
+	if cfg.SkipStaleChannels != "10d" {
+		t.Errorf("SkipStaleChannels = %q, want 10d", cfg.SkipStaleChannels)
 	}
 	if cfg.FullSweepInterval != "14d" {
 		t.Errorf("FullSweepInterval = %q, want 14d", cfg.FullSweepInterval)

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -234,6 +235,78 @@ func TestMovedResumeChannelIDs_SkipsMissingCheckpointBeforeCoverage(t *testing.T
 	want := []string{"C_NEW_MISSING", "C_UNKNOWN_MISSING", "C_MOVED"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("movedResumeChannelIDs() = %v, want %v", got, want)
+	}
+}
+
+type testSlackLink string
+
+func (l testSlackLink) String() string {
+	return string(l)
+}
+
+func TestScopedResumeArgsFromLatest_ExcludesUnmovedAndPreservesMovedCheckpoints(t *testing.T) {
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	tracked := []slack.Channel{
+		{ID: "C_MOVED"},
+		{ID: "C_UNMOVED"},
+		{ID: "C_NEW"},
+	}
+	latest := map[testSlackLink]time.Time{
+		"C_MOVED":           now,
+		"C_MOVED:111.111":   now,
+		"C_UNMOVED":         now,
+		"C_UNMOVED:222.222": now,
+		"C_UNTRACKED":       now,
+		"C_UNTRACKED:333":   now,
+	}
+	checkpoints := map[string]time.Time{
+		"C_MOVED":     now,
+		"C_UNMOVED":   now,
+		"C_UNTRACKED": now,
+	}
+	movedIDs := []string{"C_MOVED", "C_NEW"}
+
+	got := scopedResumeArgsFromLatest(tracked, latest, checkpoints, movedIDs)
+	sort.Strings(got)
+	want := []string{
+		"C_NEW",
+		"^C_UNMOVED",
+		"^C_UNMOVED:222.222",
+		"^C_UNTRACKED",
+		"^C_UNTRACKED:333",
+	}
+	sort.Strings(want)
+
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("scopedResumeArgsFromLatest() = %v, want %v", got, want)
+	}
+}
+
+func TestScopedResumeArgsFromLatest_MovedOnlyUsesExistingCheckpoints(t *testing.T) {
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	got := scopedResumeArgsFromLatest(
+		[]slack.Channel{{ID: "C_MOVED"}},
+		map[testSlackLink]time.Time{
+			"C_MOVED":         now,
+			"C_MOVED:111.111": now,
+		},
+		map[string]time.Time{"C_MOVED": now},
+		[]string{"C_MOVED"},
+	)
+	if len(got) != 0 {
+		t.Fatalf("scopedResumeArgsFromLatest() = %v, want empty args", got)
+	}
+}
+
+func TestScopedResumeArgsFromLatest_NoMovedChannels(t *testing.T) {
+	got := scopedResumeArgsFromLatest(
+		[]slack.Channel{{ID: "C_UNMOVED"}},
+		map[testSlackLink]time.Time{"C_UNMOVED": time.Now()},
+		map[string]time.Time{"C_UNMOVED": time.Now()},
+		nil,
+	)
+	if got != nil {
+		t.Fatalf("scopedResumeArgsFromLatest() = %v, want nil", got)
 	}
 }
 

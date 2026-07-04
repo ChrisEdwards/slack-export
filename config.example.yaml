@@ -66,6 +66,10 @@ lookback: 7d
 # sync. Set to "" to disable. Periodic full sweeps ignore this setting.
 skip_stale_threads: 21d
 
-# How often sync runs a full sweep without stale-thread skipping.
+# Skip channel refreshes for channels idle longer than this duration during
+# normal sync. Set to "" to disable. Periodic full sweeps ignore this setting.
+skip_stale_channels: 21d
+
+# How often sync runs a full sweep without stale skipping.
 # Set to "" to disable scheduled full sweeps.
 full_sweep_interval: 7d

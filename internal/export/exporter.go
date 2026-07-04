@@ -191,16 +191,20 @@ func (e *Exporter) Sync(ctx context.Context, now time.Time) error {
 }
 
 func (e *Exporter) resumeArchive(ctx context.Context, archiveDir string, tracked []slack.Channel) error {
-	resumeIDs := e.scopedResumeChannels(ctx, archiveDir, tracked)
-	if len(resumeIDs) == 0 {
+	resumeArgs, hasWork := e.scopedResumeArgs(ctx, archiveDir, tracked)
+	if !hasWork {
 		fmt.Println("Archive already current")
 		return nil
 	}
 
 	now := time.Now()
 	opts := e.resumeOptions(archiveDir, now)
-	fmt.Printf("Resuming archive for %d channel(s)\n", len(resumeIDs))
-	if err := ResumeArchive(ctx, e.slackdump, archiveDir, resumeIDs, opts); err != nil {
+	if len(resumeArgs) == 0 {
+		fmt.Println("Resuming archive with existing checkpoints")
+	} else {
+		fmt.Printf("Resuming archive with %d scoped entity arg(s)\n", len(resumeArgs))
+	}
+	if err := ResumeArchive(ctx, e.slackdump, archiveDir, resumeArgs, opts); err != nil {
 		return fmt.Errorf("resuming archive: %w", err)
 	}
 	if opts.SkipStaleThreads == "" && opts.SkipStaleChannels == "" {
@@ -235,7 +239,7 @@ func (e *Exporter) resumeOptions(archiveDir string, now time.Time) ResumeOptions
 	opts := ResumeOptions{
 		Lookback:          e.cfg.Lookback,
 		SkipStaleThreads:  e.cfg.SkipStaleThreads,
-		SkipStaleChannels: e.cfg.SkipStaleThreads,
+		SkipStaleChannels: e.cfg.SkipStaleChannels,
 		Dedupe:            true,
 	}
 	if fullSweepDue(archiveDir, e.cfg.FullSweepInterval, now) {
@@ -245,24 +249,24 @@ func (e *Exporter) resumeOptions(archiveDir string, now time.Time) ResumeOptions
 	return opts
 }
 
-func (e *Exporter) scopedResumeChannels(ctx context.Context, archiveDir string, tracked []slack.Channel) []string {
+func (e *Exporter) scopedResumeArgs(ctx context.Context, archiveDir string, tracked []slack.Channel) ([]string, bool) {
 	fallback := channelIDs(tracked)
 	counts, err := e.edgeClient.ClientCounts(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: counts scoping failed, resuming all channels: %v\n", err)
-		return fallback
+		return fallback, len(fallback) > 0
 	}
 	src, err := source.Load(ctx, archiveDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: archive checkpoint load failed, resuming all channels: %v\n", err)
-		return fallback
+		return fallback, len(fallback) > 0
 	}
 	defer func() { _ = src.Close() }()
 
 	latest, err := src.Latest(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: archive checkpoint read failed, resuming all channels: %v\n", err)
-		return fallback
+		return fallback, len(fallback) > 0
 	}
 
 	checkpoints := make(map[string]time.Time, len(latest))
@@ -278,7 +282,44 @@ func (e *Exporter) scopedResumeChannels(ctx context.Context, archiveDir string, 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: archive coverage read failed, missing checkpoints will be resumed: %v\n", err)
 	}
-	return movedResumeChannelIDs(tracked, checkpoints, countLatest, coverageStart)
+	movedIDs := movedResumeChannelIDs(tracked, checkpoints, countLatest, coverageStart)
+	if len(movedIDs) == 0 {
+		return nil, false
+	}
+	return scopedResumeArgsFromLatest(tracked, latest, checkpoints, movedIDs), true
+}
+
+func scopedResumeArgsFromLatest[K interface {
+	fmt.Stringer
+	comparable
+}](
+	tracked []slack.Channel,
+	latest map[K]time.Time,
+	checkpoints map[string]time.Time,
+	movedIDs []string,
+) []string {
+	if len(movedIDs) == 0 {
+		return nil
+	}
+
+	trackedSet := channelIDSet(channelIDs(tracked))
+	movedSet := channelIDSet(movedIDs)
+	args := make([]string, 0, len(latest))
+	for link := range latest {
+		key := fmt.Sprint(link)
+		channelID := strings.SplitN(key, ":", 2)[0]
+		if !trackedSet[channelID] || !movedSet[channelID] {
+			args = append(args, "^"+key)
+		}
+	}
+
+	for _, id := range movedIDs {
+		if _, ok := checkpoints[id]; !ok {
+			args = append(args, id)
+		}
+	}
+
+	return args
 }
 
 func movedResumeChannelIDs(
@@ -339,4 +380,12 @@ func channelIDs(chans []slack.Channel) []string {
 		ids = append(ids, ch.ID)
 	}
 	return ids
+}
+
+func channelIDSet(ids []string) map[string]bool {
+	result := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		result[id] = true
+	}
+	return result
 }
