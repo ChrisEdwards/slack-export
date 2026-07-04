@@ -21,6 +21,21 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Timezone != "America/New_York" {
 		t.Errorf("Timezone = %q, want %q", cfg.Timezone, "America/New_York")
 	}
+	if cfg.ArchiveDir != "~/.local/share/slack-export/archive" {
+		t.Errorf("ArchiveDir = %q, want default archive directory", cfg.ArchiveDir)
+	}
+	if cfg.SeedDate != "" {
+		t.Errorf("SeedDate = %q, want empty default", cfg.SeedDate)
+	}
+	if cfg.Lookback != "7d" {
+		t.Errorf("Lookback = %q, want 7d", cfg.Lookback)
+	}
+	if cfg.SkipStaleThreads != "21d" {
+		t.Errorf("SkipStaleThreads = %q, want 21d", cfg.SkipStaleThreads)
+	}
+	if cfg.FullSweepInterval != "7d" {
+		t.Errorf("FullSweepInterval = %q, want 7d", cfg.FullSweepInterval)
+	}
 }
 
 func TestLoad_ExplicitPath(t *testing.T) {
@@ -34,7 +49,11 @@ include:
   - "team-*"
 exclude:
   - "*-archive"
-slackdump_path: "/usr/local/bin/slackdump"
+archive_dir: "/archives"
+seed_date: "2026-01-01"
+lookback: "3d"
+skip_stale_threads: ""
+full_sweep_interval: "14d"
 `
 	if err := os.WriteFile(configPath, []byte(content), 0600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -57,11 +76,28 @@ slackdump_path: "/usr/local/bin/slackdump"
 	if len(cfg.Exclude) != 1 {
 		t.Errorf("len(Exclude) = %d, want 1", len(cfg.Exclude))
 	}
+	if cfg.ArchiveDir != "/archives" {
+		t.Errorf("ArchiveDir = %q, want /archives", cfg.ArchiveDir)
+	}
+	if cfg.SeedDate != "2026-01-01" {
+		t.Errorf("SeedDate = %q, want 2026-01-01", cfg.SeedDate)
+	}
+	if cfg.Lookback != "3d" {
+		t.Errorf("Lookback = %q, want 3d", cfg.Lookback)
+	}
+	if cfg.SkipStaleThreads != "" {
+		t.Errorf("SkipStaleThreads = %q, want empty override", cfg.SkipStaleThreads)
+	}
+	if cfg.FullSweepInterval != "14d" {
+		t.Errorf("FullSweepInterval = %q, want 14d", cfg.FullSweepInterval)
+	}
 }
 
 func TestLoad_EnvOverride(t *testing.T) {
 	t.Setenv("SLACK_EXPORT_OUTPUT_DIR", "/env/override/path")
 	t.Setenv("SLACK_EXPORT_TIMEZONE", "UTC")
+	t.Setenv("SLACK_EXPORT_ARCHIVE_DIR", "/env/archive")
+	t.Setenv("SLACK_EXPORT_LOOKBACK", "2d")
 
 	cfg, err := Load("")
 	if err != nil {
@@ -73,6 +109,12 @@ func TestLoad_EnvOverride(t *testing.T) {
 	}
 	if cfg.Timezone != "UTC" {
 		t.Errorf("Timezone = %q, want %q", cfg.Timezone, "UTC")
+	}
+	if cfg.ArchiveDir != "/env/archive" {
+		t.Errorf("ArchiveDir = %q, want /env/archive", cfg.ArchiveDir)
+	}
+	if cfg.Lookback != "2d" {
+		t.Errorf("Lookback = %q, want 2d", cfg.Lookback)
 	}
 }
 

@@ -1,0 +1,263 @@
+package export
+
+import (
+	"context"
+	"iter"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	rslack "github.com/rusq/slack"
+)
+
+type memoryArchiveSource struct {
+	channels []rslack.Channel
+	users    []rslack.User
+	messages map[string][]rslack.Message
+	threads  map[string][]rslack.Message
+}
+
+func TestRenderSourceRange_WritesOnlyWhenContentChanges(t *testing.T) {
+	src := memoryArchiveSource{
+		channels: []rslack.Channel{{
+			GroupConversation: rslack.GroupConversation{
+				Conversation: rslack.Conversation{ID: "C123"},
+				Name:         "engineering",
+			},
+		}},
+		users: []rslack.User{{ID: "U1", Name: "alice", RealName: "Alice"}},
+		messages: map[string][]rslack.Message{
+			"C123": {
+				{Msg: rslack.Msg{
+					Type:      "message",
+					User:      "U1",
+					Text:      "Stable content",
+					Timestamp: "1783094460.000000",
+				}},
+			},
+		},
+	}
+	outputDir := t.TempDir()
+
+	writes, err := RenderSourceRange(context.Background(), src, outputDir, "2026-07-03", "2026-07-03", "America/Chicago")
+	if err != nil {
+		t.Fatalf("RenderSourceRange() first run error = %v", err)
+	}
+	if writes != 1 {
+		t.Fatalf("first run writes = %d, want 1", writes)
+	}
+	outPath := filepath.Join(outputDir, "2026-07-03", "2026-07-03-engineering.md")
+	info, err := os.Stat(outPath)
+	if err != nil {
+		t.Fatalf("stat rendered file: %v", err)
+	}
+	firstMod := info.ModTime()
+
+	time.Sleep(10 * time.Millisecond)
+	writes, err = RenderSourceRange(context.Background(), src, outputDir, "2026-07-03", "2026-07-03", "America/Chicago")
+	if err != nil {
+		t.Fatalf("RenderSourceRange() second run error = %v", err)
+	}
+	if writes != 0 {
+		t.Fatalf("second run writes = %d, want 0", writes)
+	}
+	info, err = os.Stat(outPath)
+	if err != nil {
+		t.Fatalf("stat rendered file after second run: %v", err)
+	}
+	if !info.ModTime().Equal(firstMod) {
+		t.Errorf("mtime changed on identical render: got %s want %s", info.ModTime(), firstMod)
+	}
+}
+
+func (s memoryArchiveSource) Channels(context.Context) ([]rslack.Channel, error) {
+	return s.channels, nil
+}
+
+func (s memoryArchiveSource) Users(context.Context) ([]rslack.User, error) {
+	return s.users, nil
+}
+
+func (s memoryArchiveSource) AllMessages(_ context.Context, channelID string) (iter.Seq2[rslack.Message, error], error) {
+	return seqMessages(s.messages[channelID]), nil
+}
+
+func (s memoryArchiveSource) AllThreadMessages(
+	_ context.Context,
+	channelID string,
+	threadID string,
+) (iter.Seq2[rslack.Message, error], error) {
+	return seqMessages(s.threads[channelID+":"+threadID]), nil
+}
+
+func seqMessages(messages []rslack.Message) iter.Seq2[rslack.Message, error] {
+	return func(yield func(rslack.Message, error) bool) {
+		for _, msg := range messages {
+			if !yield(msg, nil) {
+				return
+			}
+		}
+	}
+}
+
+func TestRenderChannelDate_IncludesLateReplyInContinuationSection(t *testing.T) {
+	src := memoryArchiveSource{
+		channels: []rslack.Channel{{
+			GroupConversation: rslack.GroupConversation{
+				Conversation: rslack.Conversation{ID: "C123"},
+				Name:         "engineering",
+			},
+		}},
+		users: []rslack.User{
+			{ID: "U1", Name: "alice", RealName: "Alice"},
+			{ID: "U2", Name: "bob", RealName: "Bob"},
+		},
+		messages: map[string][]rslack.Message{
+			"C123": {
+				{Msg: rslack.Msg{
+					Type:            "message",
+					User:            "U1",
+					Text:            "Parent text with <@U2>",
+					Timestamp:       "1782922930.000000",
+					ThreadTimestamp: "1782922930.000000",
+					ReplyCount:      2,
+				}},
+				{Msg: rslack.Msg{
+					Type:      "message",
+					User:      "U2",
+					Text:      "A normal message on the reply day",
+					Timestamp: "1783094460.000000",
+				}},
+			},
+		},
+		threads: map[string][]rslack.Message{
+			"C123:1782922930.000000": {
+				{Msg: rslack.Msg{
+					Type:            "message",
+					User:            "U1",
+					Text:            "Parent text with <@U2>",
+					Timestamp:       "1782922930.000000",
+					ThreadTimestamp: "1782922930.000000",
+					ReplyCount:      2,
+				}},
+				{Msg: rslack.Msg{
+					Type:            "message",
+					User:            "U2",
+					Text:            "Same-day reply stays nested with parent",
+					Timestamp:       "1782923230.000000",
+					ThreadTimestamp: "1782922930.000000",
+				}},
+				{Msg: rslack.Msg{
+					Type:            "message",
+					User:            "U2",
+					Text:            "Late reply belongs to reply day",
+					Timestamp:       "1783098060.000000",
+					ThreadTimestamp: "1782922930.000000",
+				}},
+				{Msg: rslack.Msg{
+					Type:            "message",
+					SubType:         rslack.MsgSubTypeThreadBroadcast,
+					User:            "U2",
+					Text:            "Broadcast reply should not be duplicated",
+					Timestamp:       "1783098120.000000",
+					ThreadTimestamp: "1782922930.000000",
+				}},
+			},
+		},
+	}
+
+	got, err := RenderChannelDate(context.Background(), src, RenderRequest{
+		Date:        "2026-07-03",
+		Timezone:    "America/Chicago",
+		ChannelID:   "C123",
+		ChannelName: "engineering",
+	})
+	if err != nil {
+		t.Fatalf("RenderChannelDate() error = %v", err)
+	}
+
+	for _, want := range []string{
+		"> Bob [U2] @ 03/07/2026 16:01:00 Z:",
+		"A normal message on the reply day",
+		"## Thread continuations",
+		"### Thread started 2026-07-01 (see 2026-07-01/2026-07-01-engineering.md)",
+		"[context] > Alice [U1] @ 01/07/2026 16:22:10 Z:",
+		"[context] Parent text with Bob",
+		"|   > Bob [U2] @ 03/07/2026 17:01:00 Z:",
+		"|   Late reply belongs to reply day",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("rendered output missing %q:\n%s", want, got)
+		}
+	}
+
+	for _, notWant := range []string{
+		"Same-day reply stays nested with parent",
+		"Broadcast reply should not be duplicated",
+	} {
+		if strings.Contains(got, notWant) {
+			t.Errorf("rendered output should not contain %q:\n%s", notWant, got)
+		}
+	}
+}
+
+func TestRenderChannelDate_UsesWorkdayBoundaryForContinuations(t *testing.T) {
+	src := memoryArchiveSource{
+		channels: []rslack.Channel{{
+			GroupConversation: rslack.GroupConversation{
+				Conversation: rslack.Conversation{ID: "C123"},
+				Name:         "engineering",
+			},
+		}},
+		users: []rslack.User{
+			{ID: "U1", Name: "alice", RealName: "Alice"},
+			{ID: "U2", Name: "bob", RealName: "Bob"},
+		},
+		messages: map[string][]rslack.Message{
+			"C123": {
+				{Msg: rslack.Msg{
+					Type:            "message",
+					User:            "U1",
+					Text:            "Parent before boundary",
+					Timestamp:       "1782922930.000000",
+					ThreadTimestamp: "1782922930.000000",
+					ReplyCount:      1,
+				}},
+			},
+		},
+		threads: map[string][]rslack.Message{
+			"C123:1782922930.000000": {
+				{Msg: rslack.Msg{
+					Type:            "message",
+					User:            "U1",
+					Text:            "Parent before boundary",
+					Timestamp:       "1782922930.000000",
+					ThreadTimestamp: "1782922930.000000",
+					ReplyCount:      1,
+				}},
+				{Msg: rslack.Msg{
+					Type:            "message",
+					User:            "U2",
+					Text:            "Reply at 2:30am local is previous work day",
+					Timestamp:       "1783063800.000000",
+					ThreadTimestamp: "1782922930.000000",
+				}},
+			},
+		},
+	}
+
+	got, err := RenderChannelDate(context.Background(), src, RenderRequest{
+		Date:        "2026-07-02",
+		Timezone:    "America/Chicago",
+		ChannelID:   "C123",
+		ChannelName: "engineering",
+	})
+	if err != nil {
+		t.Fatalf("RenderChannelDate() error = %v", err)
+	}
+	if !strings.Contains(got, "Reply at 2:30am local is previous work day") {
+		t.Errorf("rendered output should include 2:30am local reply in previous work day:\n%s", got)
+	}
+}

@@ -170,6 +170,8 @@ func TestCountsResponse_Unmarshal(t *testing.T) {
 				"id": "C12345678",
 				"last_read": "1737676800.000000",
 				"latest": "1737676900.123456",
+				"thread_latest": "1737676999.000000",
+				"thread_count": 2,
 				"mention_count": 5,
 				"has_unreads": true
 			},
@@ -225,6 +227,12 @@ func TestCountsResponse_Unmarshal(t *testing.T) {
 	}
 	if ch1.MentionCount != 5 {
 		t.Errorf("expected MentionCount 5, got %d", ch1.MentionCount)
+	}
+	if ch1.ThreadLatest != "1737676999.000000" {
+		t.Errorf("expected ThreadLatest 1737676999.000000, got %s", ch1.ThreadLatest)
+	}
+	if ch1.ThreadCount != 2 {
+		t.Errorf("expected ThreadCount 2, got %d", ch1.ThreadCount)
 	}
 	if !ch1.HasUnreads {
 		t.Error("expected HasUnreads to be true")

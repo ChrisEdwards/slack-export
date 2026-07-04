@@ -159,9 +159,9 @@ Main export workflow:
 File: `internal/export/slackdump.go`
 
 Wrapper for slackdump CLI:
-- `Archive(ctx, channelIDs []string, timeFrom, timeTo time.Time) (string, error)`
-- `FormatText(ctx, archiveDir string) (string, error)`
-- Parse slackdump output to get directory/zip paths
+- `BootstrapArchive(ctx, archiveDir string, channelIDs []string, timeFrom time.Time) error`
+- `ResumeArchive(ctx, archiveDir string, channelIDs []string, opts ResumeOptions) error`
+- Render day files from the persistent database archive
 
 ### Step 7: Implement CLI Commands
 File: `cmd/slack-export/main.go`

@@ -1,7 +1,6 @@
 package export
 
 import (
-	"archive/zip"
 	"context"
 	"os"
 	"path/filepath"
@@ -20,7 +19,7 @@ func TestFindSlackdump_FromPATH(t *testing.T) {
 	tmpDir := t.TempDir()
 	fakeBin := filepath.Join(tmpDir, "slackdump")
 	script := `#!/bin/sh
-echo "Slackdump 3.2.0 (commit: test1234) built on: 2024-01-01"
+echo "Slackdump 4.4.1 (commit: test1234) built on: 2026-07-01"
 `
 	if err := os.WriteFile(fakeBin, []byte(script), 0755); err != nil {
 		t.Fatal(err)
@@ -44,6 +43,16 @@ echo "Slackdump 3.2.0 (commit: test1234) built on: 2024-01-01"
 	}
 }
 
+func TestParseSlackdumpVersion_V441(t *testing.T) {
+	got, err := parseSlackdumpVersion("Slackdump 4.4.1 (commit: abc12345) built on: 2026-07-01")
+	if err != nil {
+		t.Fatalf("parseSlackdumpVersion() error = %v", err)
+	}
+	if got != "4.4.1" {
+		t.Errorf("parseSlackdumpVersion() = %q, want 4.4.1", got)
+	}
+}
+
 func TestFindSlackdump_NotFound(t *testing.T) {
 	// Set both exe dir and PATH to empty dirs
 	oldExeDir := testExeDir
@@ -61,405 +70,118 @@ func TestFindSlackdump_NotFound(t *testing.T) {
 	}
 }
 
-func TestArchive_EmptyChannels(t *testing.T) {
+func TestBootstrapArchive_EmptyChannels(t *testing.T) {
 	ctx := context.Background()
 	timeFrom := time.Date(2026, 1, 22, 0, 0, 0, 0, time.UTC)
-	timeTo := time.Date(2026, 1, 23, 0, 0, 0, 0, time.UTC)
 
-	_, err := Archive(ctx, "/nonexistent/slackdump", nil, timeFrom, timeTo)
+	err := BootstrapArchive(ctx, "/nonexistent/slackdump", t.TempDir(), nil, timeFrom)
 	if err == nil {
-		t.Fatal("Archive() with empty channels should return error")
+		t.Fatal("BootstrapArchive() with empty channels should return error")
 	}
 	if !strings.Contains(err.Error(), "no channels to archive") {
 		t.Errorf("error %q should mention 'no channels to archive'", err.Error())
 	}
 
-	_, err = Archive(ctx, "/nonexistent/slackdump", []string{}, timeFrom, timeTo)
+	err = BootstrapArchive(ctx, "/nonexistent/slackdump", t.TempDir(), []string{}, timeFrom)
 	if err == nil {
-		t.Fatal("Archive() with empty slice should return error")
+		t.Fatal("BootstrapArchive() with empty slice should return error")
 	}
 }
 
-func TestArchive_InvalidBinary(t *testing.T) {
+func TestBootstrapArchive_CommandShape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts not supported on Windows")
+	}
+
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "args.txt")
+	fakeBin := filepath.Join(tmpDir, "slackdump")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + logPath + "\n"
+	if err := os.WriteFile(fakeBin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	archiveDir := filepath.Join(tmpDir, "archive")
+	seed := time.Date(2026, 1, 22, 8, 0, 0, 0, time.UTC)
+	err := BootstrapArchive(context.Background(), fakeBin, archiveDir, []string{"C123", "D456"}, seed)
+	if err != nil {
+		t.Fatalf("BootstrapArchive() error = %v", err)
+	}
+
+	got, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("reading args: %v", err)
+	}
+	want := strings.Join([]string{
+		"archive",
+		"-files=false",
+		"-y",
+		"-o", archiveDir,
+		"-time-from=2026-01-22T08:00:00",
+		"C123",
+		"D456",
+		"",
+	}, "\n")
+	if string(got) != want {
+		t.Errorf("BootstrapArchive args:\n%s\nwant:\n%s", string(got), want)
+	}
+}
+
+func TestResumeArchive_CommandShape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts not supported on Windows")
+	}
+
+	tmpDir := t.TempDir()
+	logPath := filepath.Join(tmpDir, "args.txt")
+	fakeBin := filepath.Join(tmpDir, "slackdump")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + logPath + "\n"
+	if err := os.WriteFile(fakeBin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	archiveDir := filepath.Join(tmpDir, "archive")
+	opts := ResumeOptions{
+		Lookback:          "7d",
+		SkipStaleThreads:  "21d",
+		SkipStaleChannels: "21d",
+		Dedupe:            true,
+	}
+	err := ResumeArchive(context.Background(), fakeBin, archiveDir, []string{"C123"}, opts)
+	if err != nil {
+		t.Fatalf("ResumeArchive() error = %v", err)
+	}
+
+	got, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("reading args: %v", err)
+	}
+	want := strings.Join([]string{
+		"resume",
+		"-threads",
+		"-lookback", "p7d",
+		"-skip-stale-threads", "p21d",
+		"-skip-stale-channels", "p21d",
+		"-dedupe",
+		archiveDir,
+		"C123",
+		"",
+	}, "\n")
+	if string(got) != want {
+		t.Errorf("ResumeArchive args:\n%s\nwant:\n%s", string(got), want)
+	}
+}
+
+func TestBootstrapArchive_InvalidBinary(t *testing.T) {
 	ctx := context.Background()
 	timeFrom := time.Date(2026, 1, 22, 0, 0, 0, 0, time.UTC)
-	timeTo := time.Date(2026, 1, 23, 0, 0, 0, 0, time.UTC)
 
-	_, err := Archive(ctx, "/nonexistent/slackdump", []string{"C123"}, timeFrom, timeTo)
+	err := BootstrapArchive(ctx, "/nonexistent/slackdump", t.TempDir(), []string{"C123"}, timeFrom)
 	if err == nil {
-		t.Fatal("Archive() with nonexistent binary should return error")
+		t.Fatal("BootstrapArchive() with nonexistent binary should return error")
 	}
 	if !strings.Contains(err.Error(), "slackdump archive failed") {
 		t.Errorf("error %q should mention 'slackdump archive failed'", err.Error())
-	}
-}
-
-func TestFindSlackdumpDir_Found(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	slackdumpDir := filepath.Join(tmpDir, "slackdump_20260122_120000")
-	if err := os.MkdirAll(slackdumpDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := findSlackdumpDir(tmpDir)
-	if err != nil {
-		t.Fatalf("findSlackdumpDir() error = %v", err)
-	}
-	if got != slackdumpDir {
-		t.Errorf("findSlackdumpDir() = %q, want %q", got, slackdumpDir)
-	}
-}
-
-func TestFindSlackdumpDir_NotFound(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create some other files/dirs that shouldn't match
-	os.MkdirAll(filepath.Join(tmpDir, "other_dir"), 0755)
-	os.WriteFile(filepath.Join(tmpDir, "some_file.txt"), []byte("data"), 0644)
-
-	_, err := findSlackdumpDir(tmpDir)
-	if err == nil {
-		t.Fatal("findSlackdumpDir() with no slackdump dir should return error")
-	}
-	if !strings.Contains(err.Error(), "did not create expected output directory") {
-		t.Errorf("error %q should mention expected output directory", err.Error())
-	}
-}
-
-func TestFindSlackdumpDir_EmptyDir(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	_, err := findSlackdumpDir(tmpDir)
-	if err == nil {
-		t.Fatal("findSlackdumpDir() with empty dir should return error")
-	}
-}
-
-func TestFindSlackdumpDir_NonexistentDir(t *testing.T) {
-	_, err := findSlackdumpDir("/nonexistent/path")
-	if err == nil {
-		t.Fatal("findSlackdumpDir() with nonexistent path should return error")
-	}
-	if !strings.Contains(err.Error(), "reading temp dir") {
-		t.Errorf("error %q should mention 'reading temp dir'", err.Error())
-	}
-}
-
-func TestFormatText_InvalidBinary(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	archiveDir := filepath.Join(tmpDir, "slackdump_20260122_120000")
-
-	_, err := FormatText(ctx, "/nonexistent/slackdump", archiveDir)
-	if err == nil {
-		t.Fatal("FormatText() with nonexistent binary should return error")
-	}
-	if !strings.Contains(err.Error(), "slackdump format text failed") {
-		t.Errorf("error %q should mention 'slackdump format text failed'", err.Error())
-	}
-}
-
-func TestFindZipFile_Found(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	zipFile := filepath.Join(tmpDir, "slackdump_20260122_120000.zip")
-	if err := os.WriteFile(zipFile, []byte("fake zip"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := findZipFile(tmpDir)
-	if err != nil {
-		t.Fatalf("findZipFile() error = %v", err)
-	}
-	if got != zipFile {
-		t.Errorf("findZipFile() = %q, want %q", got, zipFile)
-	}
-}
-
-func TestFindZipFile_NotFound(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create some other files/dirs that shouldn't match
-	os.MkdirAll(filepath.Join(tmpDir, "other_dir"), 0755)
-	os.WriteFile(filepath.Join(tmpDir, "some_file.txt"), []byte("data"), 0644)
-
-	_, err := findZipFile(tmpDir)
-	if err == nil {
-		t.Fatal("findZipFile() with no zip should return error")
-	}
-	if !strings.Contains(err.Error(), "did not create expected zip file") {
-		t.Errorf("error %q should mention expected zip file", err.Error())
-	}
-}
-
-func TestFindZipFile_EmptyDir(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	_, err := findZipFile(tmpDir)
-	if err == nil {
-		t.Fatal("findZipFile() with empty dir should return error")
-	}
-}
-
-func TestFindZipFile_NonexistentDir(t *testing.T) {
-	_, err := findZipFile("/nonexistent/path")
-	if err == nil {
-		t.Fatal("findZipFile() with nonexistent path should return error")
-	}
-	if !strings.Contains(err.Error(), "reading directory") {
-		t.Errorf("error %q should mention 'reading directory'", err.Error())
-	}
-}
-
-func TestFindZipFile_IgnoresDirectories(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create a directory with .zip suffix (edge case)
-	zipDir := filepath.Join(tmpDir, "fake.zip")
-	if err := os.MkdirAll(zipDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := findZipFile(tmpDir)
-	if err == nil {
-		t.Fatal("findZipFile() should ignore directories with .zip suffix")
-	}
-}
-
-// createTestZip creates a zip file with the given entries for testing.
-// entries maps filename to content.
-func createTestZip(t *testing.T, zipPath string, entries map[string]string) {
-	t.Helper()
-
-	zipFile, err := os.Create(zipPath)
-	if err != nil {
-		t.Fatalf("creating zip file: %v", err)
-	}
-	defer zipFile.Close()
-
-	w := zip.NewWriter(zipFile)
-	defer w.Close()
-
-	for name, content := range entries {
-		f, err := w.Create(name)
-		if err != nil {
-			t.Fatalf("creating zip entry %s: %v", name, err)
-		}
-		if _, err := f.Write([]byte(content)); err != nil {
-			t.Fatalf("writing zip entry %s: %v", name, err)
-		}
-	}
-}
-
-func TestExtractAndProcess_Success(t *testing.T) {
-	tmpDir := t.TempDir()
-	zipPath := filepath.Join(tmpDir, "test.zip")
-	outputDir := filepath.Join(tmpDir, "output")
-
-	// Create a test zip with channel files
-	createTestZip(t, zipPath, map[string]string{
-		"C123456.txt": "messages from engineering",
-		"D789012.txt": "messages from dm",
-	})
-
-	channelNames := map[string]string{
-		"C123456": "engineering",
-		"D789012": "dm_bob_smith",
-	}
-
-	err := ExtractAndProcess(zipPath, outputDir, "2026-01-22", channelNames)
-	if err != nil {
-		t.Fatalf("ExtractAndProcess() error = %v", err)
-	}
-
-	// Verify output structure
-	expected := map[string]string{
-		"2026-01-22/2026-01-22-engineering.md":  "messages from engineering",
-		"2026-01-22/2026-01-22-dm_bob_smith.md": "messages from dm",
-	}
-
-	for relPath, wantContent := range expected {
-		fullPath := filepath.Join(outputDir, relPath)
-		content, err := os.ReadFile(fullPath)
-		if err != nil {
-			t.Errorf("reading %s: %v", relPath, err)
-			continue
-		}
-		if string(content) != wantContent {
-			t.Errorf("content of %s = %q, want %q", relPath, content, wantContent)
-		}
-	}
-}
-
-func TestExtractAndProcess_FallbackToChannelID(t *testing.T) {
-	tmpDir := t.TempDir()
-	zipPath := filepath.Join(tmpDir, "test.zip")
-	outputDir := filepath.Join(tmpDir, "output")
-
-	createTestZip(t, zipPath, map[string]string{
-		"C123456.txt":  "known channel",
-		"CUNKNOWN.txt": "unknown channel",
-	})
-
-	// Only provide name for one channel
-	channelNames := map[string]string{
-		"C123456": "engineering",
-	}
-
-	err := ExtractAndProcess(zipPath, outputDir, "2026-01-22", channelNames)
-	if err != nil {
-		t.Fatalf("ExtractAndProcess() error = %v", err)
-	}
-
-	// Check that unknown channel falls back to ID
-	unknownPath := filepath.Join(outputDir, "2026-01-22", "2026-01-22-CUNKNOWN.md")
-	if _, err := os.Stat(unknownPath); err != nil {
-		t.Errorf("expected file at %s for unknown channel ID fallback", unknownPath)
-	}
-
-	knownPath := filepath.Join(outputDir, "2026-01-22", "2026-01-22-engineering.md")
-	if _, err := os.Stat(knownPath); err != nil {
-		t.Errorf("expected file at %s for known channel", knownPath)
-	}
-}
-
-func TestExtractAndProcess_NilChannelNames(t *testing.T) {
-	tmpDir := t.TempDir()
-	zipPath := filepath.Join(tmpDir, "test.zip")
-	outputDir := filepath.Join(tmpDir, "output")
-
-	createTestZip(t, zipPath, map[string]string{
-		"C123456.txt": "content",
-	})
-
-	// nil channelNames should work (falls back to ID)
-	err := ExtractAndProcess(zipPath, outputDir, "2026-01-22", nil)
-	if err != nil {
-		t.Fatalf("ExtractAndProcess() error = %v", err)
-	}
-
-	expectedPath := filepath.Join(outputDir, "2026-01-22", "2026-01-22-C123456.md")
-	if _, err := os.Stat(expectedPath); err != nil {
-		t.Errorf("expected file at %s", expectedPath)
-	}
-}
-
-func TestExtractAndProcess_InvalidZipPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	outputDir := filepath.Join(tmpDir, "output")
-
-	err := ExtractAndProcess("/nonexistent/path.zip", outputDir, "2026-01-22", nil)
-	if err == nil {
-		t.Fatal("ExtractAndProcess() with nonexistent zip should return error")
-	}
-	if !strings.Contains(err.Error(), "opening zip file") {
-		t.Errorf("error %q should mention 'opening zip file'", err.Error())
-	}
-}
-
-func TestExtractAndProcess_InvalidZipFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	zipPath := filepath.Join(tmpDir, "invalid.zip")
-	outputDir := filepath.Join(tmpDir, "output")
-
-	// Create an invalid zip file
-	if err := os.WriteFile(zipPath, []byte("not a zip"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	err := ExtractAndProcess(zipPath, outputDir, "2026-01-22", nil)
-	if err == nil {
-		t.Fatal("ExtractAndProcess() with invalid zip should return error")
-	}
-	if !strings.Contains(err.Error(), "opening zip file") {
-		t.Errorf("error %q should mention 'opening zip file'", err.Error())
-	}
-}
-
-func TestExtractAndProcess_EmptyZip(t *testing.T) {
-	tmpDir := t.TempDir()
-	zipPath := filepath.Join(tmpDir, "empty.zip")
-	outputDir := filepath.Join(tmpDir, "output")
-
-	createTestZip(t, zipPath, map[string]string{})
-
-	err := ExtractAndProcess(zipPath, outputDir, "2026-01-22", nil)
-	if err != nil {
-		t.Fatalf("ExtractAndProcess() with empty zip should succeed, got error = %v", err)
-	}
-
-	// Date directory should still be created
-	dateDir := filepath.Join(outputDir, "2026-01-22")
-	info, err := os.Stat(dateDir)
-	if err != nil {
-		t.Errorf("date directory should exist: %v", err)
-	} else if !info.IsDir() {
-		t.Error("date directory should be a directory")
-	}
-}
-
-func TestExtractAndProcess_SkipsDirectories(t *testing.T) {
-	tmpDir := t.TempDir()
-	zipPath := filepath.Join(tmpDir, "test.zip")
-	outputDir := filepath.Join(tmpDir, "output")
-
-	// Create a zip with a directory entry manually
-	zipFile, err := os.Create(zipPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	w := zip.NewWriter(zipFile)
-	// Add a directory entry
-	_, err = w.Create("subdir/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Add a file
-	f, err := w.Create("C123.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.Write([]byte("content"))
-	w.Close()
-	zipFile.Close()
-
-	err = ExtractAndProcess(zipPath, outputDir, "2026-01-22", nil)
-	if err != nil {
-		t.Fatalf("ExtractAndProcess() error = %v", err)
-	}
-
-	// The file should exist
-	filePath := filepath.Join(outputDir, "2026-01-22", "2026-01-22-C123.md")
-	if _, err := os.Stat(filePath); err != nil {
-		t.Errorf("expected file at %s", filePath)
-	}
-}
-
-func TestExtractAndProcess_EmptyChannelName(t *testing.T) {
-	tmpDir := t.TempDir()
-	zipPath := filepath.Join(tmpDir, "test.zip")
-	outputDir := filepath.Join(tmpDir, "output")
-
-	createTestZip(t, zipPath, map[string]string{
-		"C123456.txt": "content",
-	})
-
-	// Empty string value should fall back to ID
-	channelNames := map[string]string{
-		"C123456": "",
-	}
-
-	err := ExtractAndProcess(zipPath, outputDir, "2026-01-22", channelNames)
-	if err != nil {
-		t.Fatalf("ExtractAndProcess() error = %v", err)
-	}
-
-	// Should use channel ID since name is empty
-	expectedPath := filepath.Join(outputDir, "2026-01-22", "2026-01-22-C123456.md")
-	if _, err := os.Stat(expectedPath); err != nil {
-		t.Errorf("expected file at %s (fallback to ID when name is empty)", expectedPath)
 	}
 }
 

@@ -1,11 +1,9 @@
 package export
 
 import (
-	"archive/zip"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,8 +15,8 @@ import (
 	"github.com/chrisedwards/slack-export/internal/slack"
 )
 
-// MinSlackdumpVersion is the minimum version that has the bug fix from PR #444.
-const MinSlackdumpVersion = "3.1.13"
+// MinSlackdumpVersion is the minimum version with database archive resume support.
+const MinSlackdumpVersion = "4.4.1"
 
 // parseSlackdumpVersion extracts the version from slackdump version output.
 // Expected format: "Slackdump 3.1.13 (commit: abc12345) built on: 2024-01-15"
@@ -155,206 +153,83 @@ func FindSlackdump() (string, error) {
 	return "", errors.New("slackdump not found - ensure it's installed alongside slack-export")
 }
 
-// Archive runs slackdump archive with the given channels and time range.
-// It creates a temp directory, runs slackdump there, and returns the path to
-// the created archive directory (slackdump_YYYYMMDD_HHMMSS/).
-// The caller is responsible for cleaning up with os.RemoveAll(filepath.Dir(archiveDir)).
-func Archive(
+// ResumeOptions configures a slackdump v4 resume run.
+type ResumeOptions struct {
+	Lookback          string
+	SkipStaleThreads  string
+	SkipStaleChannels string
+	Dedupe            bool
+}
+
+// BootstrapArchive creates a persistent slackdump v4 database archive.
+func BootstrapArchive(
 	ctx context.Context,
 	slackdumpPath string,
+	archiveDir string,
 	channelIDs []string,
-	timeFrom, timeTo time.Time,
-) (string, error) {
+	timeFrom time.Time,
+) error {
 	if len(channelIDs) == 0 {
-		return "", errors.New("no channels to archive")
+		return errors.New("no channels to archive")
 	}
 
-	// slackdump expects datetime without timezone suffix (e.g., "2006-01-02T15:04:05")
 	const slackdumpTimeFormat = "2006-01-02T15:04:05"
 	args := []string{
 		"archive",
 		"-files=false",
+		"-y",
+		"-o", archiveDir,
 		fmt.Sprintf("-time-from=%s", timeFrom.UTC().Format(slackdumpTimeFormat)),
-		fmt.Sprintf("-time-to=%s", timeTo.UTC().Format(slackdumpTimeFormat)),
 	}
 	args = append(args, channelIDs...)
 
-	tmpDir, err := os.MkdirTemp("", "slack-export-*")
-	if err != nil {
-		return "", fmt.Errorf("creating temp dir: %w", err)
-	}
-
-	// #nosec G204 -- slackdumpPath comes from user configuration, not untrusted input
-	cmd := exec.CommandContext(ctx, slackdumpPath, args...)
-	cmd.Dir = tmpDir
-
-	// Debug: show the command being run
-	fmt.Printf("EXECUTING: %s %s\n", slackdumpPath, strings.Join(args, " "))
-
-	// Stream output in real-time so we can see progress
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("slackdump archive failed: %w", err)
-	}
-
-	archiveDir, err := findSlackdumpDir(tmpDir)
-	if err != nil {
-		return "", err
-	}
-
-	return archiveDir, nil
+	return runSlackdump(ctx, slackdumpPath, args, "slackdump archive failed")
 }
 
-// FormatText runs slackdump format text to convert an archive to text files.
-// It returns the path to the created .zip file containing .txt files for each channel.
-func FormatText(ctx context.Context, slackdumpPath, archiveDir string) (string, error) {
-	// #nosec G204 -- slackdumpPath comes from user configuration, not untrusted input
-	cmd := exec.CommandContext(ctx, slackdumpPath, "format", "text", archiveDir)
-	// Run in the parent directory so the zip file is created there
-	cmd.Dir = filepath.Dir(archiveDir)
-
-	// Debug: show the command being run
-	fmt.Printf("EXECUTING: %s format text %s\n", slackdumpPath, archiveDir)
-
-	// Stream output in real-time so we can see which channel fails
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	err := cmd.Run()
-	if err != nil {
-		return "", fmt.Errorf("slackdump format text failed: %w", err)
-	}
-
-	parentDir := filepath.Dir(archiveDir)
-	zipPath, err := findZipFile(parentDir)
-	if err != nil {
-		return "", err
-	}
-
-	return zipPath, nil
-}
-
-// ExtractAndProcess extracts the zip file and organizes files into the final output structure.
-// It creates a date directory under outputDir (e.g., slack-logs/2026-01-22/) and renames
-// files from channel ID format (C123456.txt) to dated channel name format (2026-01-22-engineering.md).
-// The channelNames map provides ID to name mappings; unknown IDs fall back to the raw ID.
-func ExtractAndProcess(zipPath, outputDir, date string, channelNames map[string]string) error {
-	dateDir := filepath.Join(outputDir, date)
-	if err := os.MkdirAll(dateDir, 0750); err != nil {
-		return fmt.Errorf("creating date directory: %w", err)
-	}
-
-	r, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return fmt.Errorf("opening zip file: %w", err)
-	}
-	defer func() { _ = r.Close() }()
-
-	for _, f := range r.File {
-		if err := extractAndRenameFile(f, dateDir, date, channelNames); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// metadataFiles are slackdump output files that should be skipped (not channel exports).
-var metadataFiles = map[string]bool{
-	"channels.txt": true,
-	"users.txt":    true,
-}
-
-// extractAndRenameFile extracts a single file from the zip and renames it appropriately.
-func extractAndRenameFile(
-	f *zip.File,
-	dateDir, date string,
-	channelNames map[string]string,
+// ResumeArchive refreshes a persistent slackdump v4 database archive.
+func ResumeArchive(
+	ctx context.Context,
+	slackdumpPath string,
+	archiveDir string,
+	channelIDs []string,
+	opts ResumeOptions,
 ) error {
-	// Skip directories
-	if f.FileInfo().IsDir() {
-		return nil
+	args := []string{"resume", "-threads"}
+	if opts.Lookback != "" {
+		args = append(args, "-lookback", toISODuration(opts.Lookback))
 	}
-
-	baseName := filepath.Base(f.Name)
-
-	// Skip slackdump metadata files
-	if metadataFiles[baseName] {
-		return nil
+	if opts.SkipStaleThreads != "" {
+		args = append(args, "-skip-stale-threads", toISODuration(opts.SkipStaleThreads))
 	}
-
-	// Extract channel ID from filename (e.g., "C123456.txt")
-	channelID := strings.TrimSuffix(baseName, ".txt")
-
-	// Get channel name for filename
-	name := channelID
-	if channelNames != nil {
-		if n, ok := channelNames[channelID]; ok && n != "" {
-			name = n
-		}
+	if opts.SkipStaleChannels != "" {
+		args = append(args, "-skip-stale-channels", toISODuration(opts.SkipStaleChannels))
 	}
+	if opts.Dedupe {
+		args = append(args, "-dedupe")
+	}
+	args = append(args, archiveDir)
+	args = append(args, channelIDs...)
 
-	// Create output: YYYY-MM-DD-channelname.md
-	outName := fmt.Sprintf("%s-%s.md", date, name)
-	outPath := filepath.Join(dateDir, outName)
-
-	return extractFile(f, outPath)
+	return runSlackdump(ctx, slackdumpPath, args, "slackdump resume failed")
 }
 
-// extractFile extracts a single file from a zip archive to the given destination path.
-func extractFile(f *zip.File, destPath string) error {
-	rc, err := f.Open()
-	if err != nil {
-		return fmt.Errorf("opening zip entry %s: %w", f.Name, err)
+func toISODuration(value string) string {
+	if value == "" || strings.HasPrefix(strings.ToLower(value), "p") {
+		return value
 	}
-	defer func() { _ = rc.Close() }()
+	return "p" + value
+}
 
-	// #nosec G304 -- destPath is constructed from trusted date/channel data, not user input
-	outFile, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("creating output file %s: %w", destPath, err)
+func runSlackdump(ctx context.Context, slackdumpPath string, args []string, errPrefix string) error {
+	// #nosec G204 -- slackdumpPath comes from FindSlackdump, not untrusted input
+	cmd := exec.CommandContext(ctx, slackdumpPath, args...)
+	fmt.Printf("EXECUTING: %s %s\n", slackdumpPath, strings.Join(args, " "))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s: %w", errPrefix, err)
 	}
-	defer func() { _ = outFile.Close() }()
-
-	// #nosec G110 -- zip bomb protection not needed for slackdump output
-	if _, err := io.Copy(outFile, rc); err != nil {
-		return fmt.Errorf("extracting %s: %w", f.Name, err)
-	}
-
 	return nil
-}
-
-// findZipFile locates the .zip file in the given directory.
-func findZipFile(dir string) (string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", fmt.Errorf("reading directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".zip") {
-			return filepath.Join(dir, entry.Name()), nil
-		}
-	}
-
-	return "", errors.New("slackdump did not create expected zip file")
-}
-
-// findSlackdumpDir locates the slackdump_* directory in the given parent.
-func findSlackdumpDir(parentDir string) (string, error) {
-	entries, err := os.ReadDir(parentDir)
-	if err != nil {
-		return "", fmt.Errorf("reading temp dir: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), "slackdump_") {
-			return filepath.Join(parentDir, entry.Name()), nil
-		}
-	}
-
-	return "", errors.New("slackdump did not create expected output directory")
 }
 
 // SlackdumpRunner wraps the slackdump CLI for message export.

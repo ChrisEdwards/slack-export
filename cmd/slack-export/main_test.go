@@ -2,9 +2,7 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestExportCmd_Flags(t *testing.T) {
@@ -140,187 +138,23 @@ func TestSyncCmd_UsageAndHelp(t *testing.T) {
 	}
 }
 
-func TestFindLastExportDate_EmptyDir(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	date, err := findLastExportDate(tmpDir)
-	if err != nil {
-		t.Errorf("findLastExportDate() error = %v", err)
-	}
-	if date != "" {
-		t.Errorf("findLastExportDate() = %q, want empty string for empty dir", date)
-	}
-}
-
-func TestFindLastExportDate_NonExistentDir(t *testing.T) {
-	date, err := findLastExportDate("/nonexistent/dir/path")
-	if err != nil {
-		t.Errorf("findLastExportDate() error = %v, want nil for non-existent dir", err)
-	}
-	if date != "" {
-		t.Errorf("findLastExportDate() = %q, want empty string for non-existent dir", date)
-	}
-}
-
-func TestFindLastExportDate_NoDatedFolders(t *testing.T) {
-	tmpDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(tmpDir, "random-folder"), 0750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(tmpDir, "another-folder"), 0750); err != nil {
-		t.Fatal(err)
-	}
-
-	date, err := findLastExportDate(tmpDir)
-	if err != nil {
-		t.Errorf("findLastExportDate() error = %v", err)
-	}
-	if date != "" {
-		t.Errorf("findLastExportDate() = %q, want empty string for no dated folders", date)
-	}
-}
-
-func TestFindLastExportDate_SingleDate(t *testing.T) {
-	tmpDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(tmpDir, "2026-01-22"), 0750); err != nil {
-		t.Fatal(err)
-	}
-
-	date, err := findLastExportDate(tmpDir)
-	if err != nil {
-		t.Errorf("findLastExportDate() error = %v", err)
-	}
-	if date != "2026-01-22" {
-		t.Errorf("findLastExportDate() = %q, want 2026-01-22", date)
-	}
-}
-
-func TestFindLastExportDate_MultipleDates(t *testing.T) {
-	tmpDir := t.TempDir()
-	dates := []string{"2026-01-15", "2026-01-22", "2026-01-18"}
-	for _, d := range dates {
-		if err := os.MkdirAll(filepath.Join(tmpDir, d), 0750); err != nil {
-			t.Fatal(err)
+func TestRenderCmd_Registered(t *testing.T) {
+	found := false
+	for _, cmd := range rootCmd.Commands() {
+		if cmd.Name() == "render" {
+			found = true
+			break
 		}
 	}
-
-	date, err := findLastExportDate(tmpDir)
-	if err != nil {
-		t.Errorf("findLastExportDate() error = %v", err)
-	}
-	if date != "2026-01-22" {
-		t.Errorf("findLastExportDate() = %q, want 2026-01-22 (most recent)", date)
+	if !found {
+		t.Error("render command should be registered with root")
 	}
 }
 
-func TestFindLastExportDate_MixedContent(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Dated folders
-	if err := os.MkdirAll(filepath.Join(tmpDir, "2026-01-20"), 0750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(tmpDir, "2026-01-22"), 0750); err != nil {
-		t.Fatal(err)
-	}
-
-	// Non-dated folders
-	if err := os.MkdirAll(filepath.Join(tmpDir, "other-folder"), 0750); err != nil {
-		t.Fatal(err)
-	}
-
-	// Files (should be ignored)
-	if err := os.WriteFile(filepath.Join(tmpDir, "2026-01-25"), []byte("file"), 0640); err != nil {
-		t.Fatal(err)
-	}
-
-	// Invalid date format folders
-	if err := os.MkdirAll(filepath.Join(tmpDir, "26-01-22"), 0750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(tmpDir, "2026-1-22"), 0750); err != nil {
-		t.Fatal(err)
-	}
-
-	date, err := findLastExportDate(tmpDir)
-	if err != nil {
-		t.Errorf("findLastExportDate() error = %v", err)
-	}
-	if date != "2026-01-22" {
-		t.Errorf("findLastExportDate() = %q, want 2026-01-22", date)
-	}
-}
-
-func TestSyncStartDate_FirstRunStartsToday(t *testing.T) {
-	tmpDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmpDir, "2026-01-21__general.txt"), []byte("legacy"), 0640); err != nil {
-		t.Fatal(err)
-	}
-
-	loc := time.FixedZone("test", -5*60*60)
-	now := time.Date(2026, 1, 22, 10, 0, 0, 0, time.UTC)
-
-	date, hadPrevious, err := syncStartDate(tmpDir, loc, now)
-	if err != nil {
-		t.Fatalf("syncStartDate() error = %v", err)
-	}
-	if hadPrevious {
-		t.Error("syncStartDate() should report no previous dated exports")
-	}
-	if date != "2026-01-22" {
-		t.Errorf("syncStartDate() = %q, want today's local date 2026-01-22", date)
-	}
-}
-
-func TestSyncStartDate_UsesLatestDatedExport(t *testing.T) {
-	tmpDir := t.TempDir()
-	for _, date := range []string{"2026-01-20", "2026-01-22", "2026-01-21"} {
-		if err := os.MkdirAll(filepath.Join(tmpDir, date), 0750); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	loc := time.FixedZone("test", -5*60*60)
-	now := time.Date(2026, 1, 23, 10, 0, 0, 0, time.UTC)
-
-	date, hadPrevious, err := syncStartDate(tmpDir, loc, now)
-	if err != nil {
-		t.Fatalf("syncStartDate() error = %v", err)
-	}
-	if !hadPrevious {
-		t.Error("syncStartDate() should report previous dated exports")
-	}
-	if date != "2026-01-22" {
-		t.Errorf("syncStartDate() = %q, want latest dated export 2026-01-22", date)
-	}
-}
-
-func TestDatePattern(t *testing.T) {
-	valid := []string{
-		"2026-01-22",
-		"2025-12-31",
-		"2000-01-01",
-		"1999-06-15",
-	}
-	for _, d := range valid {
-		if !datePattern.MatchString(d) {
-			t.Errorf("datePattern should match %q", d)
-		}
-	}
-
-	invalid := []string{
-		"26-01-22",
-		"2026-1-22",
-		"2026-01-2",
-		"2026/01/22",
-		"20260122",
-		"2026-01-22-extra",
-		"prefix-2026-01-22",
-	}
-	for _, d := range invalid {
-		if datePattern.MatchString(d) {
-			t.Errorf("datePattern should NOT match %q", d)
-		}
+func TestRenderCmd_FullFlag(t *testing.T) {
+	fullFlag := renderCmd.Flags().Lookup("full")
+	if fullFlag == nil {
+		t.Error("render command should have --full flag")
 	}
 }
 

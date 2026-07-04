@@ -217,8 +217,8 @@ func TestExportDate_InvalidDate(t *testing.T) {
 	if err == nil {
 		t.Error("ExportDate() should fail with invalid date")
 	}
-	if !strings.Contains(err.Error(), "calculating date bounds") {
-		t.Errorf("error should mention date bounds: %v", err)
+	if !strings.Contains(err.Error(), "parsing from date") {
+		t.Errorf("error should mention parsing from date: %v", err)
 	}
 }
 
@@ -231,126 +231,84 @@ func TestExportDate_InvalidTimezone(t *testing.T) {
 	if err == nil {
 		t.Error("ExportDate() should fail with invalid timezone")
 	}
-	if !strings.Contains(err.Error(), "calculating date bounds") {
-		t.Errorf("error should mention date bounds: %v", err)
+	if !strings.Contains(err.Error(), "loading timezone") {
+		t.Errorf("error should mention loading timezone: %v", err)
 	}
 }
 
 func TestExportDate_NoActiveChannels(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		if r.URL.Path == "/users.list" {
-			_, _ = w.Write([]byte(`{
-				"ok": true,
-				"members": [],
-				"response_metadata": {"next_cursor": ""}
-			}`))
-		} else if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
-			_, _ = w.Write([]byte(`{
-				"ok": true,
-				"self": {"id": "U123", "team_id": "T999"},
-				"team": {"id": "T999", "name": "Test"},
-				"channels": [],
-				"ims": []
-			}`))
-		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
-			_, _ = w.Write([]byte(`{"ok": true, "channels": []}`))
-		}
-	}))
-	defer server.Close()
-
-	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
-	e := &Exporter{
-		cfg:        &config.Config{Timezone: "America/New_York"},
-		edgeClient: slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/").WithSlackAPIURL(server.URL),
-	}
-
-	err := e.ExportDate(context.Background(), "2026-01-22")
-	if err != nil {
-		t.Errorf("ExportDate() should succeed with no active channels: %v", err)
-	}
-}
-
-func TestExportDate_AllChannelsFilteredOut(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		if r.URL.Path == "/users.list" {
-			_, _ = w.Write([]byte(`{
-				"ok": true,
-				"members": [],
-				"response_metadata": {"next_cursor": ""}
-			}`))
-		} else if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
-			_, _ = w.Write([]byte(`{
-				"ok": true,
-				"self": {"id": "U123", "team_id": "T999"},
-				"team": {"id": "T999", "name": "Test"},
-				"channels": [{"id": "C001", "name": "general", "is_channel": true}],
-				"ims": []
-			}`))
-		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
-			_, _ = w.Write([]byte(`{
-				"ok": true,
-				"channels": [{"id": "C001", "latest": "1737676900.123456"}]
-			}`))
-		}
-	}))
-	defer server.Close()
-
-	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
 	e := &Exporter{
 		cfg: &config.Config{
-			Timezone: "America/New_York",
-			Exclude:  []string{"general"}, // Exclude all channels
+			ArchiveDir: t.TempDir(),
+			SeedDate:   "2026-01-01",
+			Timezone:   "America/New_York",
 		},
-		edgeClient: slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/").WithSlackAPIURL(server.URL),
-	}
-
-	err := e.ExportDate(context.Background(), "2026-01-22")
-	if err != nil {
-		t.Errorf("ExportDate() should succeed when all filtered out: %v", err)
-	}
-}
-
-func TestExportDate_EdgeAPIError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/users.list" {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{
-				"ok": true,
-				"members": [],
-				"response_metadata": {"next_cursor": ""}
-			}`))
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"ok": false, "error": "server_error"}`))
-		}
-	}))
-	defer server.Close()
-
-	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
-	e := &Exporter{
-		cfg:        &config.Config{Timezone: "America/New_York"},
-		edgeClient: slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/").WithSlackAPIURL(server.URL),
+		creds: &slack.Credentials{Workspace: "test"},
 	}
 
 	err := e.ExportDate(context.Background(), "2026-01-22")
 	if err == nil {
-		t.Error("ExportDate() should fail on Edge API error")
+		t.Fatal("ExportDate() should fail when archive is missing")
 	}
-	if !strings.Contains(err.Error(), "getting active channels") {
-		t.Errorf("error should mention getting channels: %v", err)
+	if !strings.Contains(err.Error(), "run slack-export sync first") {
+		t.Errorf("error should tell user to run sync: %v", err)
 	}
 }
 
-func TestBuildChannelMaps(t *testing.T) {
+func TestExportDate_AllChannelsFilteredOut(t *testing.T) {
+	archiveBase := t.TempDir()
+	e := &Exporter{
+		cfg: &config.Config{
+			ArchiveDir: archiveBase,
+			SeedDate:   "2026-01-23",
+			Timezone:   "America/New_York",
+		},
+		creds: &slack.Credentials{Workspace: "test"},
+	}
+
+	err := e.ExportDate(context.Background(), "2026-01-22")
+	if err == nil {
+		t.Fatal("ExportDate() should fail before seed date")
+	}
+	if !strings.Contains(err.Error(), "predates archive seed_date") {
+		t.Errorf("error should mention reseeding: %v", err)
+	}
+}
+
+func TestExportDate_EdgeAPIError(t *testing.T) {
+	e := &Exporter{
+		cfg: &config.Config{
+			ArchiveDir: t.TempDir(),
+			SeedDate:   "2026-01-01",
+			Timezone:   "America/New_York",
+		},
+		creds: &slack.Credentials{Workspace: "Test Workspace"},
+	}
+
+	archiveDir, err := e.ArchiveDir()
+	if err != nil {
+		t.Fatalf("ArchiveDir() error = %v", err)
+	}
+	if !strings.HasSuffix(archiveDir, "test_workspace") {
+		t.Errorf("ArchiveDir() = %q, want sanitized workspace suffix", archiveDir)
+	}
+	err = e.ExportDate(context.Background(), "2026-01-22")
+	if err == nil {
+		t.Error("ExportDate() should fail without archive")
+	}
+	if !strings.Contains(err.Error(), "archive does not exist") {
+		t.Errorf("error should mention archive missing: %v", err)
+	}
+}
+
+func TestChannelIDs(t *testing.T) {
 	chans := []slack.Channel{
 		{ID: "C001", Name: "general"},
 		{ID: "C002", Name: "random"},
 		{ID: "D001", Name: "dm_bob"},
 	}
 
-	ids, names := buildChannelMaps(chans)
+	ids := channelIDs(chans)
 
 	if len(ids) != 3 {
 		t.Errorf("expected 3 ids, got %d", len(ids))
@@ -362,45 +320,14 @@ func TestBuildChannelMaps(t *testing.T) {
 			t.Errorf("ids[%d] = %q, want %q", i, id, expectedIDs[i])
 		}
 	}
-
-	if names["C001"] != "general" {
-		t.Errorf("names[C001] = %q, want general", names["C001"])
-	}
-	if names["C002"] != "random" {
-		t.Errorf("names[C002] = %q, want random", names["C002"])
-	}
-	if names["D001"] != "dm_bob" {
-		t.Errorf("names[D001] = %q, want dm_bob", names["D001"])
-	}
 }
 
-func TestBuildChannelMaps_Empty(t *testing.T) {
-	ids, names := buildChannelMaps(nil)
+func TestChannelIDs_Empty(t *testing.T) {
+	ids := channelIDs(nil)
 
 	if len(ids) != 0 {
 		t.Errorf("expected empty ids, got %d", len(ids))
 	}
-	if len(names) != 0 {
-		t.Errorf("expected empty names, got %d", len(names))
-	}
-}
-
-func TestCleanupTempDir(t *testing.T) {
-	tmpDir := t.TempDir()
-	subDir := filepath.Join(tmpDir, "slackdump_20260122")
-	if err := os.MkdirAll(subDir, 0750); err != nil {
-		t.Fatal(err)
-	}
-
-	cleanupTempDir(subDir)
-
-	if _, err := os.Stat(tmpDir); !os.IsNotExist(err) {
-		t.Error("cleanupTempDir should remove parent directory")
-	}
-}
-
-func TestCleanupTempDir_EmptyPath(t *testing.T) {
-	cleanupTempDir("")
 }
 
 func TestExportRange_InvalidTimezone(t *testing.T) {
@@ -460,133 +387,57 @@ func TestExportRange_FromAfterTo(t *testing.T) {
 }
 
 func TestExportRange_SingleDay(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		if r.URL.Path == "/users.list" {
-			_, _ = w.Write([]byte(`{
-				"ok": true,
-				"members": [],
-				"response_metadata": {"next_cursor": ""}
-			}`))
-		} else if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
-			_, _ = w.Write([]byte(`{
-				"ok": true,
-				"self": {"id": "U123", "team_id": "T999"},
-				"team": {"id": "T999", "name": "Test"},
-				"channels": [],
-				"ims": []
-			}`))
-		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
-			_, _ = w.Write([]byte(`{"ok": true, "channels": []}`))
-		}
-	}))
-	defer server.Close()
-
-	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
 	e := &Exporter{
-		cfg:        &config.Config{Timezone: "America/New_York"},
-		edgeClient: slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/").WithSlackAPIURL(server.URL),
+		cfg: &config.Config{
+			ArchiveDir: t.TempDir(),
+			SeedDate:   "2026-01-01",
+			Timezone:   "America/New_York",
+		},
+		creds: &slack.Credentials{Workspace: "test"},
 	}
 
 	err := e.ExportRange(context.Background(), "2026-01-22", "2026-01-22")
-	if err != nil {
-		t.Errorf("ExportRange() should succeed with single day: %v", err)
+	if err == nil {
+		t.Fatal("ExportRange() should fail when archive is missing")
+	}
+	if !strings.Contains(err.Error(), "run slack-export sync first") {
+		t.Errorf("error should tell user to run sync: %v", err)
 	}
 }
 
 func TestExportRange_MultiDay(t *testing.T) {
-	callCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		if r.URL.Path == "/users.list" {
-			_, _ = w.Write([]byte(`{
-				"ok": true,
-				"members": [],
-				"response_metadata": {"next_cursor": ""}
-			}`))
-		} else if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
-			callCount++
-			_, _ = w.Write([]byte(`{
-				"ok": true,
-				"self": {"id": "U123", "team_id": "T999"},
-				"team": {"id": "T999", "name": "Test"},
-				"channels": [],
-				"ims": []
-			}`))
-		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
-			_, _ = w.Write([]byte(`{"ok": true, "channels": []}`))
-		}
-	}))
-	defer server.Close()
-
-	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
 	e := &Exporter{
-		cfg:        &config.Config{Timezone: "America/New_York"},
-		edgeClient: slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/").WithSlackAPIURL(server.URL),
-	}
-
-	err := e.ExportRange(context.Background(), "2026-01-22", "2026-01-24")
-	if err != nil {
-		t.Errorf("ExportRange() should succeed: %v", err)
-	}
-
-	// userBoot is called once per ExportDate, so 3 times for 3 days
-	if callCount != 3 {
-		t.Errorf("expected 3 userBoot calls (one per day), got %d", callCount)
-	}
-}
-
-func TestExportRange_ContinuesOnErrorAndReturnsFailure(t *testing.T) {
-	callCount := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/users.list" {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{
-				"ok": true,
-				"members": [],
-				"response_metadata": {"next_cursor": ""}
-			}`))
-		} else if strings.HasSuffix(r.URL.Path, "/client.userBoot") {
-			callCount++
-			// Fail on second day (2026-01-23), succeed on others
-			if callCount == 2 {
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = w.Write([]byte(`{"ok": false, "error": "server_error"}`))
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{
-				"ok": true,
-				"self": {"id": "U123", "team_id": "T999"},
-				"team": {"id": "T999", "name": "Test"},
-				"channels": [],
-				"ims": []
-			}`))
-		} else if strings.HasSuffix(r.URL.Path, "/client.counts") {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"ok": true, "channels": []}`))
-		}
-	}))
-	defer server.Close()
-
-	creds := &slack.Credentials{Token: "xoxc-test", TeamID: "T999"}
-	e := &Exporter{
-		cfg:        &config.Config{Timezone: "America/New_York"},
-		edgeClient: slack.NewEdgeClient(creds).WithWorkspaceURL(server.URL + "/").WithSlackAPIURL(server.URL),
+		cfg: &config.Config{
+			ArchiveDir: t.TempDir(),
+			SeedDate:   "2026-01-01",
+			Timezone:   "America/New_York",
+		},
+		creds: &slack.Credentials{Workspace: "test"},
 	}
 
 	err := e.ExportRange(context.Background(), "2026-01-22", "2026-01-24")
 	if err == nil {
-		t.Fatal("ExportRange() should return an error after any single-day failure")
+		t.Fatal("ExportRange() should fail when archive is missing")
 	}
-	for _, want := range []string{"1 date export(s) failed", "2026-01-23", "getting active channels"} {
+}
+
+func TestExportRange_ContinuesOnErrorAndReturnsFailure(t *testing.T) {
+	e := &Exporter{
+		cfg: &config.Config{
+			ArchiveDir: t.TempDir(),
+			SeedDate:   "2026-01-23",
+			Timezone:   "America/New_York",
+		},
+		creds: &slack.Credentials{Workspace: "test"},
+	}
+
+	err := e.ExportRange(context.Background(), "2026-01-22", "2026-01-24")
+	if err == nil {
+		t.Fatal("ExportRange() should fail when range starts before seed")
+	}
+	for _, want := range []string{"predates archive seed_date", "2026-01-23"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("ExportRange() error = %q, want it to contain %q", err.Error(), want)
 		}
-	}
-
-	// Should have processed all 3 days despite error on day 2
-	if callCount != 3 {
-		t.Errorf("expected 3 userBoot calls (continuing past error), got %d", callCount)
 	}
 }

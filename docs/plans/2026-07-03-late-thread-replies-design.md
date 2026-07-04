@@ -363,6 +363,6 @@ What existing users can rely on staying the same, and what changes.
 - [ ] Channel files created for continuation-only days
 
 **Phase 5, cleanup**
-- [ ] Delete `format text` zip pipeline and `ExtractAndProcess`
+- [x] Delete the legacy text-format zip pipeline
 - [ ] Update `export` semantics (render from DB, reseed error path)
 - [ ] README and config.example.yaml updates

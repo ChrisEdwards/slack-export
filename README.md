@@ -4,7 +4,7 @@ Export your Slack conversations to markdown files that AI agents can read.
 
 **The problem:** AI coding agents like Claude Code can't access Slack. They can't see what your team discussed, what decisions were made, or what tasks were assigned.
 
-**The solution:** Run `slack-export sync` daily to export your Slack channels to local markdown files. Point your AI agent at the folder, and it can now search and reference your team's conversations.
+**The solution:** Run `slack-export sync` daily to maintain a local Slack archive and render your channels to markdown files. Point your AI agent at the folder, and it can now search and reference your team's conversations.
 
 ```
 ~/slack-logs/
@@ -24,11 +24,12 @@ Each file contains that day's messages in clean, readable markdown. Filenames in
 
 ## Features
 
-- **Daily sync** - exports from your last export date through today
+- **Daily sync** - resumes a persistent local archive and renders recent changes
 - **Glob filtering** - include/exclude channels by pattern (e.g., `team-*`, `*-alerts`)
 - **Human-readable DMs** - `dm_alice` instead of `dm_U015ANT8LLD`
 - **Timezone-aware** - accurate date boundaries for your location
 - **Slack Connect support** - resolves external users automatically
+- **Late thread replies** - replies posted days later appear in the reply-day file
 
 ## Installation
 
@@ -74,15 +75,15 @@ Re-run with `--force` to reconfigure anytime.
 slack-export sync
 ```
 
-Exports all channels from your last export date through today. On first run, exports today's messages.
-
-Sync always re-exports the most recent date in your output directory. This ensures you get a complete day even if you ran a previous export mid-day.
+On first run, `sync` bootstraps a local slackdump v4 database archive, then renders markdown files from that archive. Later runs use `slackdump resume -threads` to fetch new messages and late thread replies, then re-render the recent lookback window.
 
 Run `slack-export sync` daily (or add it to a cron job) to keep your logs up to date.
 
 ### Backfilling history
 
-`sync` always continues from the most recent date in your output directory—it doesn't fill gaps. To backfill history, use `export` for the full date range you need:
+The archive can only render dates at or after its `seed_date`. To backfill earlier history, set `seed_date` before the first sync, or reseed by creating a fresh archive with an earlier date and then run `slack-export render --full`.
+
+Once the archive covers a date, `export` renders that date or range from the local database without using Slack network calls:
 
 ```bash
 # Export from a specific date through today
@@ -93,9 +94,10 @@ slack-export export --from 2025-01-01 --to 2025-01-15
 ```
 
 **Typical workflow:**
-1. Run `slack-export sync` to start exporting from today
-2. To add history, run `slack-export export --from <start-date>` to backfill from that date through today
-3. Future `sync` calls continue from the most recent date
+1. Set `seed_date` to the earliest date you want preserved, or leave it empty to start from existing output/today
+2. Run `slack-export sync` to create and refresh the archive
+3. Use `slack-export render --full` after format changes or reseeding
+4. Use `slack-export export --from <start-date> --to <end-date>` for offline date-range rendering
 
 ### Configuring channels
 
@@ -137,6 +139,20 @@ After editing, run `slack-export channels` again to verify your changes.
 Exports use a 3am-to-3am day boundary instead of midnight. This keeps late-night work sessions together—if you're doing customer support until 2am, those messages stay with the previous day rather than splitting at midnight.
 
 The boundary uses your configured timezone.
+
+### Archive configuration
+
+```yaml
+archive_dir: ~/.local/share/slack-export/archive
+seed_date: ""                # YYYY-MM-DD; empty starts from existing output or today
+lookback: 7d                 # recent render window
+skip_stale_threads: 21d      # "" disables stale-thread skipping
+full_sweep_interval: 7d      # "" disables scheduled full sweeps
+```
+
+The archive is stored under `archive_dir` by workspace name. Dates before `seed_date` cannot be rendered from the archive; create a fresh archive with an earlier seed date when you need older history.
+
+Any day file inside the render window can change on a later sync as threads evolve or recent messages are edited. Downstream consumers should use fingerprints or mtimes instead of treating rendered day files as immutable.
 
 ## Configuration
 
@@ -260,11 +276,18 @@ slack-export sync
 ```
 
 The sync command:
-1. Scans the output directory for existing exports
-2. Finds the most recent date (YYYY-MM-DD folder)
-3. Re-exports from that date through today
+1. Creates the workspace archive on first run
+2. Resumes the archive with new messages and thread replies
+3. Renders the lookback window to dated markdown files
 
-The last export date is re-exported because it may have been incomplete.
+### Render From Local Archive
+
+```bash
+slack-export render
+slack-export render --full
+```
+
+`render` regenerates files from the local archive without network calls. The default renders the normal lookback window; `--full` renders every date from `seed_date` through today.
 
 ### Global Flags
 
@@ -301,13 +324,34 @@ slack-export stores data in standard locations:
 |------|----------|---------|
 | Configuration | `~/.config/slack-export/slack-export.yaml` | User settings |
 | User cache | `~/.cache/slack-export/users.json` | Cached external user info |
+| Slack archive | `archive_dir/<workspace>/slackdump.sqlite` | Persistent source database |
 | Exports | Configured `output_dir` (default: `./slack-logs`) | Exported messages |
 
 The user cache stores information about external Slack Connect users to avoid repeated API calls.
 
 ## How It Works
 
-1. **Channel Discovery**: Uses Slack's Edge API (`/api/client.userBoot` and `/api/conversations.list`) to get active channels. This is much faster than the standard API.
+1. **Channel Discovery**: Uses Slack's Edge API to find tracked channels and resolve DM names.
+2. **Archive Refresh**: Uses slackdump v4 `archive` and `resume -threads` to maintain a persistent SQLite archive.
+3. **Counts Scoping**: Uses Slack `client.counts` activity timestamps to skip channels that have not moved since the archive checkpoint.
+4. **Rendering**: Reads the archive database in-process and writes dated markdown files only when bytes change.
+
+Thread replies are bucketed by the day they were posted. If a reply belongs to a thread started on an earlier day, it appears at the end of the reply-day file:
+
+```markdown
+---
+
+## Thread continuations
+Replies posted this day in threads started on earlier days.
+Lines marked [context] are repeated from the original day for readability.
+
+### Thread started 2026-07-01 (see 2026-07-01/2026-07-01-engineering.md)
+[context] > Alice [U123] @ 01/07/2026 14:22:10 Z:
+[context] Original parent message text.
+
+|   > Bob [U456] @ 03/07/2026 12:01:00 Z:
+|   Late reply text.
+```
 
 2. **User Resolution**: Fetches workspace users and resolves DM names to human-readable usernames. External Slack Connect users are looked up via the `users.info` API and cached to disk.
 
@@ -397,7 +441,7 @@ cd slack-export
 make build
 
 # Also install slackdump separately
-go install github.com/rusq/slackdump/v3/cmd/slackdump@latest
+go install github.com/rusq/slackdump/v4/cmd/slackdump@v4.4.1
 ```
 
 ### Uninstall

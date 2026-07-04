@@ -74,6 +74,8 @@ type ChannelSnapshot struct {
 	ID           string `json:"id"`
 	LastRead     string `json:"last_read"`
 	Latest       string `json:"latest"`
+	ThreadLatest string `json:"thread_latest"`
+	ThreadCount  int    `json:"thread_count"`
 	MentionCount int    `json:"mention_count"`
 	HasUnreads   bool   `json:"has_unreads"`
 }

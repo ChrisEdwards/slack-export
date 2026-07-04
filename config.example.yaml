@@ -47,7 +47,25 @@ exclude:
   # - "_app_*"
   # - "*-alerts"
 
-# Path to slackdump executable (optional).
-# If not set, slack-export looks for 'slackdump' in PATH.
-# Useful if slackdump is installed in a non-standard location.
-# slackdump_path: /usr/local/bin/slackdump
+# Persistent slackdump v4 archive root.
+# slack-export stores one database archive per workspace under this directory.
+# Default: ~/.local/share/slack-export/archive
+archive_dir: ~/.local/share/slack-export/archive
+
+# First date covered by a newly bootstrapped archive.
+# Empty means first sync uses the earliest existing dated output folder, or today
+# when no output exists. Dates before the seed require reseeding the archive.
+# Format: YYYY-MM-DD
+seed_date: ""
+
+# Resume lookback window. Recent files in this window can change on later syncs
+# as edits and late thread replies arrive.
+lookback: 7d
+
+# Skip thread refreshes for threads idle longer than this duration during normal
+# sync. Set to "" to disable. Periodic full sweeps ignore this setting.
+skip_stale_threads: 21d
+
+# How often sync runs a full sweep without stale-thread skipping.
+# Set to "" to disable scheduled full sweeps.
+full_sweep_interval: 7d

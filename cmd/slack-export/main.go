@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -75,6 +74,16 @@ The last export date is re-exported because it may have been incomplete.`,
 	RunE: runSync,
 }
 
+var renderCmd = &cobra.Command{
+	Use:   "render",
+	Short: "Render Slack log files from the local archive",
+	Long: `Render Slack log files from the persistent local slackdump archive.
+
+By default, render regenerates the normal lookback window without making network calls.
+Use --full to render every date from seed_date through today.`,
+	RunE: runRender,
+}
+
 var channelsCmd = &cobra.Command{
 	Use:   "channels",
 	Short: "List active Slack channels",
@@ -111,6 +120,9 @@ func init() {
 	rootCmd.AddCommand(exportCmd)
 
 	rootCmd.AddCommand(syncCmd)
+
+	renderCmd.Flags().Bool("full", false, "Render every date from seed_date through today")
+	rootCmd.AddCommand(renderCmd)
 
 	channelsCmd.Flags().String("since", "", "Only show channels with activity since this date (YYYY-MM-DD)")
 	rootCmd.AddCommand(channelsCmd)
@@ -189,26 +201,6 @@ func runSync(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	loc, err := time.LoadLocation(cfg.Timezone)
-	if err != nil {
-		return fmt.Errorf("invalid timezone: %w", err)
-	}
-
-	now := time.Now()
-	startDate, hadPrevious, err := syncStartDate(cfg.OutputDir, loc, now)
-	if err != nil {
-		return fmt.Errorf("scanning output directory: %w", err)
-	}
-
-	if !hadPrevious {
-		fmt.Printf("No previous exports found, starting from %s\n", startDate)
-	} else {
-		fmt.Printf("Last export: %s\n", startDate)
-	}
-
-	today := now.In(loc).Format("2006-01-02")
-	fmt.Printf("Syncing from %s to %s\n", startDate, today)
-
 	exporter, err := export.NewExporter(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to initialize exporter: %w", err)
@@ -217,44 +209,60 @@ func runSync(_ *cobra.Command, _ []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	return exporter.ExportRange(ctx, startDate, today)
+	return exporter.Sync(ctx, time.Now())
 }
 
-var datePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
-
-func findLastExportDate(dir string) (string, error) {
-	entries, err := os.ReadDir(dir)
+func runRender(cmd *cobra.Command, _ []string) error {
+	cfg, err := config.Load(cfgFile)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", err
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
 	}
 
-	var dates []string
-	for _, entry := range entries {
-		if entry.IsDir() && datePattern.MatchString(entry.Name()) {
-			dates = append(dates, entry.Name())
-		}
-	}
-
-	if len(dates) == 0 {
-		return "", nil
-	}
-
-	sort.Strings(dates)
-	return dates[len(dates)-1], nil
-}
-
-func syncStartDate(outputDir string, loc *time.Location, now time.Time) (string, bool, error) {
-	lastDate, err := findLastExportDate(outputDir)
+	creds, err := slack.LoadCredentials()
 	if err != nil {
-		return "", false, err
+		return fmt.Errorf("loading credentials: %w", err)
 	}
-	if lastDate != "" {
-		return lastDate, true, nil
+	if err := creds.Validate(); err != nil {
+		return fmt.Errorf("invalid credentials: %w", err)
 	}
-	return now.In(loc).Format("2006-01-02"), false, nil
+
+	archiveDir, err := export.WorkspaceArchiveDir(cfg, creds.Workspace)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+	loc, err := time.LoadLocation(cfg.Timezone)
+	if err != nil {
+		return fmt.Errorf("invalid timezone: %w", err)
+	}
+	to := now.In(loc).Format("2006-01-02")
+	from := ""
+	full, _ := cmd.Flags().GetBool("full")
+	if full {
+		from, err = export.ConfigSeedDate(cfg, now)
+		if err != nil {
+			return err
+		}
+	} else {
+		from, to, err = export.ConfigRenderWindow(cfg, now)
+		if err != nil {
+			return err
+		}
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	writes, err := export.RenderArchiveRange(ctx, archiveDir, cfg.OutputDir, from, to, cfg.Timezone)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Rendered %s through %s (%d changed file(s))\n", from, to, writes)
+	return nil
 }
 
 func runChannels(cmd *cobra.Command, _ []string) error {
@@ -395,7 +403,7 @@ func initStepSlackdump() error {
 	if !install {
 		fmt.Println()
 		fmt.Println("To install slackdump manually, run:")
-		fmt.Println("  go install github.com/rusq/slackdump/v3/cmd/slackdump@latest")
+		fmt.Println("  go install github.com/rusq/slackdump/v4/cmd/slackdump@v4.4.1")
 		fmt.Println()
 		fmt.Println("Make sure $GOPATH/bin is in your PATH.")
 		return errors.New("slackdump required but not installed")
@@ -405,7 +413,7 @@ func initStepSlackdump() error {
 	fmt.Println()
 	fmt.Println("Installing slackdump...")
 
-	cmd := exec.Command("go", "install", "github.com/rusq/slackdump/v3/cmd/slackdump@latest")
+	cmd := exec.Command("go", "install", "github.com/rusq/slackdump/v4/cmd/slackdump@v4.4.1")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -636,8 +644,12 @@ func initStepConfig() (*config.Config, string, error) {
 
 	// Create and save config
 	cfg := &config.Config{
-		OutputDir: outputDir,
-		Timezone:  timezone,
+		OutputDir:         outputDir,
+		Timezone:          timezone,
+		ArchiveDir:        "~/.local/share/slack-export/archive",
+		Lookback:          "7d",
+		SkipStaleThreads:  "21d",
+		FullSweepInterval: "7d",
 	}
 
 	if err := cfg.Save(configPath); err != nil {

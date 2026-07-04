@@ -13,10 +13,15 @@ import (
 
 // Config holds application configuration loaded from YAML.
 type Config struct {
-	OutputDir string   `yaml:"output_dir" mapstructure:"output_dir"`
-	Timezone  string   `yaml:"timezone" mapstructure:"timezone"`
-	Include   []string `yaml:"include" mapstructure:"include"`
-	Exclude   []string `yaml:"exclude" mapstructure:"exclude"`
+	OutputDir         string   `yaml:"output_dir" mapstructure:"output_dir"`
+	Timezone          string   `yaml:"timezone" mapstructure:"timezone"`
+	Include           []string `yaml:"include" mapstructure:"include"`
+	Exclude           []string `yaml:"exclude" mapstructure:"exclude"`
+	ArchiveDir        string   `yaml:"archive_dir" mapstructure:"archive_dir"`
+	SeedDate          string   `yaml:"seed_date" mapstructure:"seed_date"`
+	Lookback          string   `yaml:"lookback" mapstructure:"lookback"`
+	SkipStaleThreads  string   `yaml:"skip_stale_threads" mapstructure:"skip_stale_threads"`
+	FullSweepInterval string   `yaml:"full_sweep_interval" mapstructure:"full_sweep_interval"`
 
 	configFile string // path to the config file used (if any)
 }
@@ -34,6 +39,11 @@ func Load(path string) (*Config, error) {
 
 	v.SetDefault("output_dir", "./slack-logs")
 	v.SetDefault("timezone", "America/New_York")
+	v.SetDefault("archive_dir", "~/.local/share/slack-export/archive")
+	v.SetDefault("seed_date", "")
+	v.SetDefault("lookback", "7d")
+	v.SetDefault("skip_stale_threads", "21d")
+	v.SetDefault("full_sweep_interval", "7d")
 
 	v.SetEnvPrefix("SLACK_EXPORT")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))

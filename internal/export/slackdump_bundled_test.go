@@ -88,7 +88,7 @@ func TestFindSlackdump_UsesPathWhenVersionSufficientAndNoBundled(t *testing.T) {
 	pathDir := t.TempDir()
 	pathBin := filepath.Join(pathDir, "slackdump")
 	script := `#!/bin/sh
-echo "Slackdump 3.2.0 (commit: test1234) built on: 2024-01-01"
+echo "Slackdump 4.4.1 (commit: test1234) built on: 2026-07-01"
 `
 	if err := os.WriteFile(pathBin, []byte(script), 0755); err != nil {
 		t.Fatal(err)
@@ -114,11 +114,11 @@ func TestFindSlackdump_SystemVersionSufficient(t *testing.T) {
 		t.Skip("shell scripts not supported on Windows")
 	}
 
-	// Create a mock slackdump that reports version 3.2.0 (above minimum)
+	// Create a mock slackdump that reports version 4.4.1 (at minimum)
 	pathDir := t.TempDir()
 	mockBin := filepath.Join(pathDir, "slackdump")
 	script := `#!/bin/sh
-echo "Slackdump 3.2.0 (commit: test1234) built on: 2024-01-01"
+echo "Slackdump 4.4.1 (commit: test1234) built on: 2026-07-01"
 `
 	if err := os.WriteFile(mockBin, []byte(script), 0755); err != nil {
 		t.Fatal(err)
@@ -151,11 +151,11 @@ func TestFindSlackdump_SystemVersionInsufficient(t *testing.T) {
 		t.Skip("shell scripts not supported on Windows")
 	}
 
-	// Create a mock slackdump that reports version 3.1.12 (below minimum)
+	// Create a mock slackdump that reports version 4.4.0 (below minimum)
 	pathDir := t.TempDir()
 	mockBin := filepath.Join(pathDir, "slackdump")
 	script := `#!/bin/sh
-echo "Slackdump 3.1.12 (commit: old12345) built on: 2023-01-01"
+echo "Slackdump 4.4.0 (commit: old12345) built on: 2026-06-01"
 `
 	if err := os.WriteFile(mockBin, []byte(script), 0755); err != nil {
 		t.Fatal(err)

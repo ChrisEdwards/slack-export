@@ -34,17 +34,17 @@ jobs:
       - name: Checkout slack-export
         uses: actions/checkout@v4
 
-      - name: Checkout slackdump fork
+      - name: Checkout slackdump
         uses: actions/checkout@v4
         with:
-          repository: ChrisEdwards/slackdump
-          path: slackdump-fork
-          ref: fix/issue-599-thread-slice-panic
+          repository: rusq/slackdump
+          path: slackdump
+          ref: v4.4.1
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.26.4'
 
       - name: Build slack-export
         env:
@@ -60,7 +60,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
         run: |
-          cd slackdump-fork
+          cd slackdump
           go build -ldflags="-s -w" -o ../dist/slackdump${{ matrix.ext }} ./cmd/slackdump
 
       - name: Create archive (Unix)
