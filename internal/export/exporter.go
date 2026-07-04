@@ -3,6 +3,7 @@ package export
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/chrisedwards/slack-export/internal/config"
 	"github.com/chrisedwards/slack-export/internal/slack"
 	"github.com/rusq/slackdump/v4/source"
+	_ "modernc.org/sqlite"
 )
 
 // Exporter orchestrates the export workflow for Slack channels.
@@ -170,6 +172,9 @@ func (e *Exporter) Sync(ctx context.Context, now time.Time) error {
 		if err := BootstrapArchive(ctx, e.slackdump, archiveDir, ids, seedStart); err != nil {
 			return fmt.Errorf("bootstrapping archive: %w", err)
 		}
+		if err := markFullSweep(archiveDir, now); err != nil {
+			return err
+		}
 	} else if err := e.resumeArchive(ctx, archiveDir, tracked); err != nil {
 		return err
 	}
@@ -270,10 +275,26 @@ func (e *Exporter) scopedResumeChannels(ctx context.Context, archiveDir string, 
 	}
 
 	countLatest := countsLatestByID(counts)
+	coverageStart, err := archiveCoverageStart(archiveDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: archive coverage read failed, missing checkpoints will be resumed: %v\n", err)
+	}
+	return movedResumeChannelIDs(tracked, checkpoints, countLatest, coverageStart)
+}
+
+func movedResumeChannelIDs(
+	tracked []slack.Channel,
+	checkpoints map[string]time.Time,
+	countLatest map[string]time.Time,
+	coverageStart time.Time,
+) []string {
 	var moved []string
 	for _, ch := range tracked {
 		checkpoint, ok := checkpoints[ch.ID]
 		if !ok {
+			if latest, ok := countLatest[ch.ID]; ok && !coverageStart.IsZero() && latest.Before(coverageStart) {
+				continue
+			}
 			moved = append(moved, ch.ID)
 			continue
 		}
@@ -282,6 +303,48 @@ func (e *Exporter) scopedResumeChannels(ctx context.Context, archiveDir string, 
 		}
 	}
 	return moved
+}
+
+func archiveCoverageStart(archiveDir string) (time.Time, error) {
+	db, err := sql.Open("sqlite", filepath.Join(archiveDir, source.DefaultDBFile))
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer func() { _ = db.Close() }()
+
+	var raw sql.NullString
+	err = db.QueryRow(`
+		SELECT MIN(FROM_TS)
+		FROM SESSION
+		WHERE MODE = 'archive'
+		  AND FINISHED = 1
+		  AND FROM_TS IS NOT NULL
+	`).Scan(&raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !raw.Valid || strings.TrimSpace(raw.String) == "" {
+		return time.Time{}, nil
+	}
+	return parseArchiveTimestamp(raw.String)
+}
+
+func parseArchiveTimestamp(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	layouts := []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05 -0700 MST",
+	}
+	var lastErr error
+	for _, layout := range layouts {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return parsed, nil
+		}
+		lastErr = err
+	}
+	return time.Time{}, fmt.Errorf("parsing archive timestamp %q: %w", value, lastErr)
 }
 
 func countsLatestByID(counts *slack.CountsResponse) map[string]time.Time {

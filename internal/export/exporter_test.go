@@ -208,6 +208,35 @@ func TestExporterIntegration_WithMockDependencies(t *testing.T) {
 	}
 }
 
+func TestMovedResumeChannelIDs_SkipsMissingCheckpointBeforeCoverage(t *testing.T) {
+	coverageStart := time.Date(2026, 7, 3, 7, 0, 0, 0, time.UTC)
+	checkpoint := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+
+	tracked := []slack.Channel{
+		{ID: "C_OLD_MISSING"},
+		{ID: "C_NEW_MISSING"},
+		{ID: "C_UNKNOWN_MISSING"},
+		{ID: "C_UNCHANGED"},
+		{ID: "C_MOVED"},
+	}
+	checkpoints := map[string]time.Time{
+		"C_UNCHANGED": checkpoint,
+		"C_MOVED":     checkpoint,
+	}
+	countLatest := map[string]time.Time{
+		"C_OLD_MISSING": coverageStart.Add(-time.Minute),
+		"C_NEW_MISSING": coverageStart.Add(time.Minute),
+		"C_UNCHANGED":   checkpoint,
+		"C_MOVED":       checkpoint.Add(time.Minute),
+	}
+
+	got := movedResumeChannelIDs(tracked, checkpoints, countLatest, coverageStart)
+	want := []string{"C_NEW_MISSING", "C_UNKNOWN_MISSING", "C_MOVED"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("movedResumeChannelIDs() = %v, want %v", got, want)
+	}
+}
+
 func TestExportDate_InvalidDate(t *testing.T) {
 	e := &Exporter{
 		cfg: &config.Config{Timezone: "America/New_York"},
