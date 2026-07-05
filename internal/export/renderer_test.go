@@ -119,6 +119,139 @@ func TestRenderSourceRange_UsesChannelNameOverrideWhenArchiveNameMissing(t *test
 	}
 }
 
+func TestRenderSourceRange_CanRenderOnlySelectedChannels(t *testing.T) {
+	src := memoryArchiveSource{
+		channels: []rslack.Channel{
+			{
+				GroupConversation: rslack.GroupConversation{
+					Conversation: rslack.Conversation{ID: "C_SKIP"},
+					Name:         "operations-alarms",
+				},
+			},
+			{
+				GroupConversation: rslack.GroupConversation{
+					Conversation: rslack.Conversation{ID: "C_KEEP"},
+					Name:         "constellation",
+				},
+			},
+		},
+		users: []rslack.User{{ID: "U1", Name: "alice", RealName: "Alice"}},
+		messages: map[string][]rslack.Message{
+			"C_SKIP": {
+				{Msg: rslack.Msg{
+					Type:      "message",
+					User:      "U1",
+					Text:      "Noisy alert",
+					Timestamp: "1783094460.000000",
+				}},
+			},
+			"C_KEEP": {
+				{Msg: rslack.Msg{
+					Type:      "message",
+					User:      "U1",
+					Text:      "Useful work discussion",
+					Timestamp: "1783094460.000000",
+				}},
+			},
+		},
+	}
+	outputDir := t.TempDir()
+
+	writes, err := renderSourceRange(
+		context.Background(),
+		src,
+		outputDir,
+		"2026-07-03",
+		"2026-07-03",
+		"America/Chicago",
+		nil,
+		[]string{"C_KEEP"},
+	)
+	if err != nil {
+		t.Fatalf("renderSourceRange() error = %v", err)
+	}
+	if writes != 1 {
+		t.Fatalf("writes = %d, want 1", writes)
+	}
+
+	keepPath := filepath.Join(outputDir, "2026-07-03", "2026-07-03-constellation.md")
+	if _, err := os.Stat(keepPath); err != nil {
+		t.Fatalf("stat included channel file: %v", err)
+	}
+	skipPath := filepath.Join(outputDir, "2026-07-03", "2026-07-03-operations-alarms.md")
+	if _, err := os.Stat(skipPath); !os.IsNotExist(err) {
+		t.Fatalf("excluded channel file should not be written, stat err = %v", err)
+	}
+}
+
+func TestRenderSourceRange_ReusesArchiveReadsAcrossDates(t *testing.T) {
+	src := &countingArchiveSource{
+		memoryArchiveSource: memoryArchiveSource{
+			channels: []rslack.Channel{{
+				GroupConversation: rslack.GroupConversation{
+					Conversation: rslack.Conversation{ID: "C123"},
+					Name:         "engineering",
+				},
+			}},
+			users: []rslack.User{{ID: "U1", Name: "alice", RealName: "Alice"}},
+			messages: map[string][]rslack.Message{
+				"C123": {
+					{Msg: rslack.Msg{
+						Type:            "message",
+						User:            "U1",
+						Text:            "Thread parent",
+						Timestamp:       "1782922930.000000",
+						ThreadTimestamp: "1782922930.000000",
+						ReplyCount:      1,
+					}},
+					{Msg: rslack.Msg{
+						Type:      "message",
+						User:      "U1",
+						Text:      "Later date message",
+						Timestamp: "1783094460.000000",
+					}},
+				},
+			},
+			threads: map[string][]rslack.Message{
+				"C123:1782922930.000000": {
+					{Msg: rslack.Msg{
+						Type:            "message",
+						User:            "U1",
+						Text:            "Thread parent",
+						Timestamp:       "1782922930.000000",
+						ThreadTimestamp: "1782922930.000000",
+						ReplyCount:      1,
+					}},
+					{Msg: rslack.Msg{
+						Type:            "message",
+						User:            "U1",
+						Text:            "Late reply",
+						Timestamp:       "1783098060.000000",
+						ThreadTimestamp: "1782922930.000000",
+					}},
+				},
+			},
+		},
+	}
+
+	writes, err := RenderSourceRange(context.Background(), src, t.TempDir(), "2026-07-01", "2026-07-03", "America/Chicago")
+	if err != nil {
+		t.Fatalf("RenderSourceRange() error = %v", err)
+	}
+	if writes != 2 {
+		t.Fatalf("writes = %d, want 2", writes)
+	}
+	if src.usersCalls != 1 {
+		t.Fatalf("Users() calls = %d, want 1", src.usersCalls)
+	}
+	if src.messageCalls["C123"] != 1 {
+		t.Fatalf("AllMessages(C123) calls = %d, want 1", src.messageCalls["C123"])
+	}
+	if src.threadCalls["C123:1782922930.000000"] != 1 {
+		t.Fatalf("AllThreadMessages(parent) calls = %d, want 1", src.threadCalls["C123:1782922930.000000"])
+	}
+}
+
 func (s memoryArchiveSource) Channels(context.Context) ([]rslack.Channel, error) {
 	return s.channels, nil
 }
@@ -137,6 +270,38 @@ func (s memoryArchiveSource) AllThreadMessages(
 	threadID string,
 ) (iter.Seq2[rslack.Message, error], error) {
 	return seqMessages(s.threads[channelID+":"+threadID]), nil
+}
+
+type countingArchiveSource struct {
+	memoryArchiveSource
+	usersCalls  int
+	messageCalls map[string]int
+	threadCalls  map[string]int
+}
+
+func (s *countingArchiveSource) Users(ctx context.Context) ([]rslack.User, error) {
+	s.usersCalls++
+	return s.memoryArchiveSource.Users(ctx)
+}
+
+func (s *countingArchiveSource) AllMessages(ctx context.Context, channelID string) (iter.Seq2[rslack.Message, error], error) {
+	if s.messageCalls == nil {
+		s.messageCalls = make(map[string]int)
+	}
+	s.messageCalls[channelID]++
+	return s.memoryArchiveSource.AllMessages(ctx, channelID)
+}
+
+func (s *countingArchiveSource) AllThreadMessages(
+	ctx context.Context,
+	channelID string,
+	threadID string,
+) (iter.Seq2[rslack.Message, error], error) {
+	if s.threadCalls == nil {
+		s.threadCalls = make(map[string]int)
+	}
+	s.threadCalls[channelID+":"+threadID]++
+	return s.memoryArchiveSource.AllThreadMessages(ctx, channelID, threadID)
 }
 
 func seqMessages(messages []rslack.Message) iter.Seq2[rslack.Message, error] {

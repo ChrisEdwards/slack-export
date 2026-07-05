@@ -49,6 +49,20 @@ func LoadArchiveSource(ctx context.Context, archiveDir string) (ArchiveSourceClo
 
 // RenderArchiveRange renders all channel files for an inclusive date range.
 func RenderArchiveRange(ctx context.Context, archiveDir, outputDir, from, to, timezone string) (int, error) {
+	return RenderArchiveRangeForChannels(ctx, archiveDir, outputDir, from, to, timezone, nil)
+}
+
+// RenderArchiveRangeForChannels renders selected channel files for an inclusive date range.
+// A nil or empty channelIDs slice renders all channels in the archive.
+func RenderArchiveRangeForChannels(
+	ctx context.Context,
+	archiveDir string,
+	outputDir string,
+	from string,
+	to string,
+	timezone string,
+	channelIDs []string,
+) (int, error) {
 	src, err := LoadArchiveSource(ctx, archiveDir)
 	if err != nil {
 		return 0, fmt.Errorf("loading archive source: %w", err)
@@ -59,7 +73,7 @@ func RenderArchiveRange(ctx context.Context, archiveDir, outputDir, from, to, ti
 	if err != nil {
 		return 0, fmt.Errorf("loading channel names: %w", err)
 	}
-	return RenderSourceRangeWithChannelNames(ctx, src, outputDir, from, to, timezone, channelNames)
+	return renderSourceRange(ctx, src, outputDir, from, to, timezone, channelNames, channelIDs)
 }
 
 // RenderSourceRange renders all channels from an already opened source.
@@ -71,7 +85,7 @@ func RenderSourceRange(
 	to string,
 	timezone string,
 ) (int, error) {
-	return renderSourceRange(ctx, src, outputDir, from, to, timezone, nil)
+	return renderSourceRange(ctx, src, outputDir, from, to, timezone, nil, nil)
 }
 
 func renderSourceRange(
@@ -82,27 +96,38 @@ func renderSourceRange(
 	to string,
 	timezone string,
 	channelNames channelNameResolver,
+	channelIDs []string,
 ) (int, error) {
 	channels, err := src.Channels(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("loading channels: %w", err)
 	}
+	channels = filterRenderChannels(channels, channelIDs)
 
 	dates, err := datesInRange(from, to, timezone)
 	if err != nil {
 		return 0, err
 	}
+	users, err := loadUsers(ctx, src)
+	if err != nil {
+		return 0, err
+	}
 
 	writes := 0
-	for _, date := range dates {
-		for _, ch := range channels {
+	for _, ch := range channels {
+		messages, err := loadChannelMessages(ctx, src, ch.ID)
+		if err != nil {
+			return writes, fmt.Errorf("loading channel messages %s: %w", ch.ID, err)
+		}
+		threads := make(threadMessageCache)
+		for _, date := range dates {
 			name := channelNames.fileName(ch)
-			content, err := RenderChannelDate(ctx, src, RenderRequest{
+			content, err := renderChannelDateFromMessages(ctx, src, RenderRequest{
 				Date:        date,
 				Timezone:    timezone,
 				ChannelID:   ch.ID,
 				ChannelName: name,
-			})
+			}, users, messages, threads)
 			if err != nil {
 				return writes, fmt.Errorf("rendering %s %s: %w", date, ch.ID, err)
 			}
@@ -122,6 +147,23 @@ func renderSourceRange(
 	return writes, nil
 }
 
+func filterRenderChannels(channels []rslack.Channel, channelIDs []string) []rslack.Channel {
+	if len(channelIDs) == 0 {
+		return channels
+	}
+	allowed := make(map[string]struct{}, len(channelIDs))
+	for _, id := range channelIDs {
+		allowed[id] = struct{}{}
+	}
+	filtered := make([]rslack.Channel, 0, len(channels))
+	for _, ch := range channels {
+		if _, ok := allowed[ch.ID]; ok {
+			filtered = append(filtered, ch)
+		}
+	}
+	return filtered
+}
+
 func writeFileIfChanged(path string, content []byte) (bool, error) {
 	cleanPath := filepath.Clean(path)
 	if existing, err := os.ReadFile(cleanPath); err == nil && bytes.Equal(existing, content) {
@@ -137,6 +179,7 @@ func writeFileIfChanged(path string, content []byte) (bool, error) {
 }
 
 type userLookup map[string]rslack.User
+type threadMessageCache map[string][]rslack.Message
 
 type continuationBlock struct {
 	parent     rslack.Message
@@ -149,20 +192,38 @@ var mentionPattern = regexp.MustCompile(`<@([A-Z0-9]+)>`)
 
 // RenderChannelDate renders one channel's markdown for one work day.
 func RenderChannelDate(ctx context.Context, src ArchiveMessageSource, req RenderRequest) (string, error) {
-	if _, _, err := GetDateBounds(req.Date, req.Timezone); err != nil {
-		return "", err
-	}
-
 	users, err := loadUsers(ctx, src)
 	if err != nil {
 		return "", err
 	}
+	return renderChannelDate(ctx, src, req, users)
+}
 
-	base, err := renderBaseSection(ctx, src, req, users)
+func renderChannelDate(ctx context.Context, src ArchiveMessageSource, req RenderRequest, users userLookup) (string, error) {
+	messages, err := loadChannelMessages(ctx, src, req.ChannelID)
 	if err != nil {
 		return "", err
 	}
-	continuations, err := renderContinuations(ctx, src, req, users)
+	return renderChannelDateFromMessages(ctx, src, req, users, messages, make(threadMessageCache))
+}
+
+func renderChannelDateFromMessages(
+	ctx context.Context,
+	src ArchiveMessageSource,
+	req RenderRequest,
+	users userLookup,
+	messages []rslack.Message,
+	threads threadMessageCache,
+) (string, error) {
+	if _, _, err := GetDateBounds(req.Date, req.Timezone); err != nil {
+		return "", err
+	}
+
+	base, err := renderBaseSection(ctx, src, req, users, messages, threads)
+	if err != nil {
+		return "", err
+	}
+	continuations, err := renderContinuations(ctx, src, req, users, messages, threads)
 	if err != nil {
 		return "", err
 	}
@@ -176,6 +237,17 @@ func RenderChannelDate(ctx context.Context, src ArchiveMessageSource, req Render
 		out.WriteString(continuations)
 	}
 	return out.String(), nil
+}
+
+func loadChannelMessages(ctx context.Context, src ArchiveMessageSource, channelID string) ([]rslack.Message, error) {
+	messages, err := collectMessages(ctx, func() (iter.Seq2[rslack.Message, error], error) {
+		return src.AllMessages(ctx, channelID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	sortMessages(messages)
+	return messages, nil
 }
 
 func loadUsers(ctx context.Context, src ArchiveMessageSource) (userLookup, error) {
@@ -195,15 +267,9 @@ func renderBaseSection(
 	src ArchiveMessageSource,
 	req RenderRequest,
 	users userLookup,
+	messages []rslack.Message,
+	threads threadMessageCache,
 ) (string, error) {
-	messages, err := collectMessages(ctx, func() (iter.Seq2[rslack.Message, error], error) {
-		return src.AllMessages(ctx, req.ChannelID)
-	})
-	if err != nil {
-		return "", err
-	}
-	sortMessages(messages)
-
 	var out bytes.Buffer
 	for _, msg := range messages {
 		if !messageBelongsToDate(msg, req.Date, req.Timezone) {
@@ -211,7 +277,7 @@ func renderBaseSection(
 		}
 		writeMessage(&out, msg, "", users)
 		if isThreadParent(msg) {
-			if err := writeSameDayReplies(ctx, &out, src, req, users, msg); err != nil {
+			if err := writeSameDayReplies(ctx, &out, src, req, users, msg, threads); err != nil {
 				return "", err
 			}
 		}
@@ -226,14 +292,12 @@ func writeSameDayReplies(
 	req RenderRequest,
 	users userLookup,
 	parent rslack.Message,
+	threads threadMessageCache,
 ) error {
-	thread, err := collectMessages(ctx, func() (iter.Seq2[rslack.Message, error], error) {
-		return src.AllThreadMessages(ctx, req.ChannelID, parent.ThreadTimestamp)
-	})
+	thread, err := threads.get(ctx, src, req.ChannelID, parent.ThreadTimestamp)
 	if err != nil {
 		return err
 	}
-	sortMessages(thread)
 	for _, reply := range thread {
 		if reply.Timestamp == parent.Timestamp || !messageBelongsToDate(reply, req.Date, req.Timezone) {
 			continue
@@ -248,14 +312,9 @@ func renderContinuations(
 	src ArchiveMessageSource,
 	req RenderRequest,
 	users userLookup,
+	messages []rslack.Message,
+	threads threadMessageCache,
 ) (string, error) {
-	messages, err := collectMessages(ctx, func() (iter.Seq2[rslack.Message, error], error) {
-		return src.AllMessages(ctx, req.ChannelID)
-	})
-	if err != nil {
-		return "", err
-	}
-
 	var blocks []continuationBlock
 	for _, parent := range messages {
 		if !isThreadParent(parent) {
@@ -268,7 +327,7 @@ func renderContinuations(
 		if parentDate >= req.Date {
 			continue
 		}
-		block, ok, err := continuationForThread(ctx, src, req, parent, parentDate)
+		block, ok, err := continuationForThread(ctx, src, req, parent, parentDate, threads)
 		if err != nil {
 			return "", err
 		}
@@ -312,14 +371,12 @@ func continuationForThread(
 	req RenderRequest,
 	parent rslack.Message,
 	parentDate string,
+	threads threadMessageCache,
 ) (continuationBlock, bool, error) {
-	thread, err := collectMessages(ctx, func() (iter.Seq2[rslack.Message, error], error) {
-		return src.AllThreadMessages(ctx, req.ChannelID, parent.ThreadTimestamp)
-	})
+	thread, err := threads.get(ctx, src, req.ChannelID, parent.ThreadTimestamp)
 	if err != nil {
 		return continuationBlock{}, false, err
 	}
-	sortMessages(thread)
 
 	var replies []rslack.Message
 	var first time.Time
@@ -343,6 +400,27 @@ func continuationForThread(
 		return continuationBlock{}, false, nil
 	}
 	return continuationBlock{parent: parent, parentDate: parentDate, replies: replies, firstReply: first}, true, nil
+}
+
+func (c threadMessageCache) get(
+	ctx context.Context,
+	src ArchiveMessageSource,
+	channelID string,
+	threadTS string,
+) ([]rslack.Message, error) {
+	key := channelID + "\x00" + threadTS
+	if messages, ok := c[key]; ok {
+		return messages, nil
+	}
+	messages, err := collectMessages(ctx, func() (iter.Seq2[rslack.Message, error], error) {
+		return src.AllThreadMessages(ctx, channelID, threadTS)
+	})
+	if err != nil {
+		return nil, err
+	}
+	sortMessages(messages)
+	c[key] = messages
+	return messages, nil
 }
 
 func collectMessages(

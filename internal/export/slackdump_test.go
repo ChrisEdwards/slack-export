@@ -142,10 +142,11 @@ func TestResumeArchive_CommandShape(t *testing.T) {
 
 	archiveDir := filepath.Join(tmpDir, "archive")
 	opts := ResumeOptions{
-		Lookback:          "7d",
-		SkipStaleThreads:  "21d",
-		SkipStaleChannels: "21d",
-		Dedupe:            true,
+		Lookback:            "7d",
+		SkipStaleThreads:    "21d",
+		SkipStaleChannels:   "21d",
+		SkipCompleteThreads: true,
+		Dedupe:              true,
 	}
 	err := ResumeArchive(context.Background(), fakeBin, archiveDir, []string{"C123"}, opts)
 	if err != nil {
@@ -162,6 +163,7 @@ func TestResumeArchive_CommandShape(t *testing.T) {
 		"-lookback", "p7d",
 		"-skip-stale-threads", "p21d",
 		"-skip-stale-channels", "p21d",
+		"-skip-complete-threads",
 		"-dedupe",
 		archiveDir,
 		"C123",

@@ -29,7 +29,7 @@ func RenderSourceRangeWithChannelNames(
 	timezone string,
 	channelNames map[string]string,
 ) (int, error) {
-	return renderSourceRange(ctx, src, outputDir, from, to, timezone, channelNameResolver(channelNames))
+	return renderSourceRange(ctx, src, outputDir, from, to, timezone, channelNameResolver(channelNames), nil)
 }
 
 func (r channelNameResolver) fileName(ch rslack.Channel) string {

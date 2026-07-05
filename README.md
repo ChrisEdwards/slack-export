@@ -148,6 +148,7 @@ seed_date: ""                # YYYY-MM-DD; empty starts from existing output or 
 lookback: 7d                 # recent render window
 skip_stale_threads: 21d      # "" disables stale-thread skipping
 skip_stale_channels: 21d     # "" disables stale-channel skipping
+skip_complete_threads: true  # skip complete thread refreshes during resume
 full_sweep_interval: 7d      # "" disables scheduled full sweeps
 ```
 

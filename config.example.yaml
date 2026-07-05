@@ -70,6 +70,11 @@ skip_stale_threads: 21d
 # normal sync. Set to "" to disable. Periodic full sweeps ignore this setting.
 skip_stale_channels: 21d
 
+# Skip thread refreshes when the archive already has the parent plus Slack's
+# reported reply count. Set to false to revisit complete threads for edits or
+# deletes, at the cost of many more Slack API calls.
+skip_complete_threads: true
+
 # How often sync runs a full sweep without stale skipping.
 # Set to "" to disable scheduled full sweeps.
 full_sweep_interval: 7d

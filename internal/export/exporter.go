@@ -182,7 +182,7 @@ func (e *Exporter) Sync(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	writes, err := RenderArchiveRange(ctx, archiveDir, e.cfg.OutputDir, from, to, e.cfg.Timezone)
+	writes, err := RenderArchiveRangeForChannels(ctx, archiveDir, e.cfg.OutputDir, from, to, e.cfg.Timezone, ids)
 	if err != nil {
 		return err
 	}
@@ -237,10 +237,11 @@ func (e *Exporter) trackedChannels(ctx context.Context) ([]slack.Channel, error)
 
 func (e *Exporter) resumeOptions(archiveDir string, now time.Time) ResumeOptions {
 	opts := ResumeOptions{
-		Lookback:          e.cfg.Lookback,
-		SkipStaleThreads:  e.cfg.SkipStaleThreads,
-		SkipStaleChannels: e.cfg.SkipStaleChannels,
-		Dedupe:            true,
+		Lookback:            e.cfg.Lookback,
+		SkipStaleThreads:    e.cfg.SkipStaleThreads,
+		SkipStaleChannels:   e.cfg.SkipStaleChannels,
+		SkipCompleteThreads: e.cfg.SkipCompleteThreads,
+		Dedupe:              true,
 	}
 	if fullSweepDue(archiveDir, e.cfg.FullSweepInterval, now) {
 		opts.SkipStaleThreads = ""
@@ -250,23 +251,22 @@ func (e *Exporter) resumeOptions(archiveDir string, now time.Time) ResumeOptions
 }
 
 func (e *Exporter) scopedResumeArgs(ctx context.Context, archiveDir string, tracked []slack.Channel) ([]string, bool) {
-	fallback := channelIDs(tracked)
 	counts, err := e.edgeClient.ClientCounts(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: counts scoping failed, resuming all channels: %v\n", err)
-		return fallback, len(fallback) > 0
+		fmt.Fprintf(os.Stderr, "Warning: counts scoping failed; skipping archive resume to avoid an unscoped Slackdump run: %v\n", err)
+		return nil, false
 	}
 	src, err := source.Load(ctx, archiveDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: archive checkpoint load failed, resuming all channels: %v\n", err)
-		return fallback, len(fallback) > 0
+		fmt.Fprintf(os.Stderr, "Warning: archive checkpoint load failed; skipping archive resume to avoid an unscoped Slackdump run: %v\n", err)
+		return nil, false
 	}
 	defer func() { _ = src.Close() }()
 
 	latest, err := src.Latest(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: archive checkpoint read failed, resuming all channels: %v\n", err)
-		return fallback, len(fallback) > 0
+		fmt.Fprintf(os.Stderr, "Warning: archive checkpoint read failed; skipping archive resume to avoid an unscoped Slackdump run: %v\n", err)
+		return nil, false
 	}
 
 	checkpoints := make(map[string]time.Time, len(latest))

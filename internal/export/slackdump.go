@@ -155,10 +155,11 @@ func FindSlackdump() (string, error) {
 
 // ResumeOptions configures a slackdump v4 resume run.
 type ResumeOptions struct {
-	Lookback          string
-	SkipStaleThreads  string
-	SkipStaleChannels string
-	Dedupe            bool
+	Lookback            string
+	SkipStaleThreads    string
+	SkipStaleChannels   string
+	SkipCompleteThreads bool
+	Dedupe              bool
 }
 
 // BootstrapArchive creates a persistent slackdump v4 database archive.
@@ -203,6 +204,9 @@ func ResumeArchive(
 	}
 	if opts.SkipStaleChannels != "" {
 		args = append(args, "-skip-stale-channels", toISODuration(opts.SkipStaleChannels))
+	}
+	if opts.SkipCompleteThreads {
+		args = append(args, "-skip-complete-threads")
 	}
 	if opts.Dedupe {
 		args = append(args, "-dedupe")
