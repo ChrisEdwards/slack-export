@@ -274,7 +274,7 @@ func (s memoryArchiveSource) AllThreadMessages(
 
 type countingArchiveSource struct {
 	memoryArchiveSource
-	usersCalls  int
+	usersCalls   int
 	messageCalls map[string]int
 	threadCalls  map[string]int
 }
