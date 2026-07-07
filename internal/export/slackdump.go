@@ -18,6 +18,10 @@ import (
 // MinSlackdumpVersion is the minimum version with database archive resume support.
 const MinSlackdumpVersion = "4.4.1"
 
+// slackdumpTimeFormat is the timestamp layout slackdump accepts for
+// -time-from and for entity time bounds (ID,oldest[,latest]).
+const slackdumpTimeFormat = "2006-01-02T15:04:05"
+
 // parseSlackdumpVersion extracts the version from slackdump version output.
 // Expected format: "Slackdump 3.1.13 (commit: abc12345) built on: 2024-01-15"
 func parseSlackdumpVersion(output string) (string, error) {
@@ -174,7 +178,6 @@ func BootstrapArchive(
 		return errors.New("no channels to archive")
 	}
 
-	const slackdumpTimeFormat = "2006-01-02T15:04:05"
 	args := []string{
 		"archive",
 		"-files=false",

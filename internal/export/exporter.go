@@ -280,13 +280,18 @@ func (e *Exporter) scopedResumeArgs(ctx context.Context, archiveDir string, trac
 	countLatest := countsLatestByID(counts)
 	coverageStart, err := archiveCoverageStart(archiveDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: archive coverage read failed, missing checkpoints will be resumed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: archive coverage read failed; skipping archive resume to avoid an unbounded Slackdump run: %v\n", err)
+		return nil, false
+	}
+	if coverageStart.IsZero() {
+		fmt.Fprintln(os.Stderr, "Warning: archive coverage start unknown; skipping archive resume to avoid an unbounded Slackdump run")
+		return nil, false
 	}
 	movedIDs := movedResumeChannelIDs(tracked, checkpoints, countLatest, coverageStart)
 	if len(movedIDs) == 0 {
 		return nil, false
 	}
-	return scopedResumeArgsFromLatest(tracked, latest, checkpoints, movedIDs), true
+	return scopedResumeArgsFromLatest(tracked, latest, checkpoints, movedIDs, coverageStart), true
 }
 
 func scopedResumeArgsFromLatest[K interface {
@@ -297,6 +302,7 @@ func scopedResumeArgsFromLatest[K interface {
 	latest map[K]time.Time,
 	checkpoints map[string]time.Time,
 	movedIDs []string,
+	coverageStart time.Time,
 ) []string {
 	if len(movedIDs) == 0 {
 		return nil
@@ -315,7 +321,10 @@ func scopedResumeArgsFromLatest[K interface {
 
 	for _, id := range movedIDs {
 		if _, ok := checkpoints[id]; !ok {
-			args = append(args, id)
+			// A checkpoint-less channel would otherwise be fetched from the
+			// beginning of its history (plus every thread ever posted in it).
+			// Bound it at the archive coverage start; nothing older is rendered.
+			args = append(args, id+","+coverageStart.UTC().Format(slackdumpTimeFormat))
 		}
 	}
 

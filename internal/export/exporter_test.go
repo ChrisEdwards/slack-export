@@ -246,6 +246,7 @@ func (l testSlackLink) String() string {
 
 func TestScopedResumeArgsFromLatest_ExcludesUnmovedAndPreservesMovedCheckpoints(t *testing.T) {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	coverageStart := time.Date(2026, 7, 3, 7, 0, 0, 0, time.UTC)
 	tracked := []slack.Channel{
 		{ID: "C_MOVED"},
 		{ID: "C_UNMOVED"},
@@ -266,10 +267,10 @@ func TestScopedResumeArgsFromLatest_ExcludesUnmovedAndPreservesMovedCheckpoints(
 	}
 	movedIDs := []string{"C_MOVED", "C_NEW"}
 
-	got := scopedResumeArgsFromLatest(tracked, latest, checkpoints, movedIDs)
+	got := scopedResumeArgsFromLatest(tracked, latest, checkpoints, movedIDs, coverageStart)
 	sort.Strings(got)
 	want := []string{
-		"C_NEW",
+		"C_NEW,2026-07-03T07:00:00",
 		"^C_UNMOVED",
 		"^C_UNMOVED:222.222",
 		"^C_UNTRACKED",
@@ -277,7 +278,27 @@ func TestScopedResumeArgsFromLatest_ExcludesUnmovedAndPreservesMovedCheckpoints(
 	}
 	sort.Strings(want)
 
-	if strings.Join(got, ",") != strings.Join(want, ",") {
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("scopedResumeArgsFromLatest() = %v, want %v", got, want)
+	}
+}
+
+func TestScopedResumeArgsFromLatest_BoundsMissingCheckpointsAtCoverageStartUTC(t *testing.T) {
+	eastern, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("loading timezone: %v", err)
+	}
+	coverageStart := time.Date(2026, 7, 3, 3, 0, 0, 0, eastern)
+
+	got := scopedResumeArgsFromLatest(
+		[]slack.Channel{{ID: "C_NEW"}},
+		map[testSlackLink]time.Time{},
+		map[string]time.Time{},
+		[]string{"C_NEW"},
+		coverageStart,
+	)
+	want := []string{"C_NEW,2026-07-03T07:00:00"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("scopedResumeArgsFromLatest() = %v, want %v", got, want)
 	}
 }
@@ -292,6 +313,7 @@ func TestScopedResumeArgsFromLatest_MovedOnlyUsesExistingCheckpoints(t *testing.
 		},
 		map[string]time.Time{"C_MOVED": now},
 		[]string{"C_MOVED"},
+		time.Date(2026, 7, 3, 7, 0, 0, 0, time.UTC),
 	)
 	if len(got) != 0 {
 		t.Fatalf("scopedResumeArgsFromLatest() = %v, want empty args", got)
@@ -304,6 +326,7 @@ func TestScopedResumeArgsFromLatest_NoMovedChannels(t *testing.T) {
 		map[testSlackLink]time.Time{"C_UNMOVED": time.Now()},
 		map[string]time.Time{"C_UNMOVED": time.Now()},
 		nil,
+		time.Date(2026, 7, 3, 7, 0, 0, 0, time.UTC),
 	)
 	if got != nil {
 		t.Fatalf("scopedResumeArgsFromLatest() = %v, want nil", got)
