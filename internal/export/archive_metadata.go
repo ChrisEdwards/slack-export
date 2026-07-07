@@ -36,6 +36,49 @@ func archiveCoverageStart(archiveDir string) (time.Time, error) {
 	return parseArchiveTimestamp(raw.String)
 }
 
+func changedResumeChannelIDs(archiveDir string) ([]string, error) {
+	db, err := sql.Open("sqlite", filepath.Join(archiveDir, source.DefaultDBFile))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = db.Close() }()
+
+	rows, err := db.Query(`
+		WITH latest_resume AS (
+			SELECT ID
+			FROM SESSION
+			WHERE MODE = 'resume'
+			  AND FINISHED = 1
+			ORDER BY ID DESC
+			LIMIT 1
+		)
+		SELECT DISTINCT C.CHANNEL_ID
+		FROM CHUNK C
+		JOIN latest_resume S ON S.ID = C.SESSION_ID
+		WHERE C.NUM_REC > 0
+		  AND C.CHANNEL_ID IS NOT NULL
+		  AND TRIM(C.CHANNEL_ID) <> ''
+		ORDER BY C.CHANNEL_ID
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 func parseArchiveTimestamp(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	layouts := []string{

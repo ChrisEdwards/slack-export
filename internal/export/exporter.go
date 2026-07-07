@@ -154,6 +154,7 @@ func (e *Exporter) Sync(ctx context.Context, now time.Time) error {
 		return err
 	}
 	ids := channelIDs(tracked)
+	renderIDs := ids
 
 	if !archiveExists(archiveDir) {
 		seedDate, err := e.seedDate(now)
@@ -171,8 +172,13 @@ func (e *Exporter) Sync(ctx context.Context, now time.Time) error {
 		if err := markFullSweep(archiveDir, now); err != nil {
 			return err
 		}
-	} else if err := e.resumeArchive(ctx, archiveDir, tracked); err != nil {
-		return err
+	} else {
+		opts := e.resumeOptions(archiveDir, now)
+		resume, err := e.resumeArchive(ctx, archiveDir, tracked, now, opts)
+		if err != nil {
+			return err
+		}
+		renderIDs = renderChannelIDsForSync(ids, resume.changedChannelIDs, resume.fullSweep)
 	}
 	if err := saveChannelNames(archiveDir, tracked); err != nil {
 		return fmt.Errorf("saving channel names: %w", err)
@@ -182,7 +188,11 @@ func (e *Exporter) Sync(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	writes, err := RenderArchiveRangeForChannels(ctx, archiveDir, e.cfg.OutputDir, from, to, e.cfg.Timezone, ids)
+	if len(renderIDs) == 0 {
+		fmt.Printf("Rendered %s through %s (0 changed file(s))\n", from, to)
+		return nil
+	}
+	writes, err := RenderArchiveRangeForChannels(ctx, archiveDir, e.cfg.OutputDir, from, to, e.cfg.Timezone, renderIDs)
 	if err != nil {
 		return err
 	}
@@ -190,29 +200,45 @@ func (e *Exporter) Sync(ctx context.Context, now time.Time) error {
 	return nil
 }
 
-func (e *Exporter) resumeArchive(ctx context.Context, archiveDir string, tracked []slack.Channel) error {
+type resumeResult struct {
+	changedChannelIDs []string
+	fullSweep         bool
+}
+
+func (e *Exporter) resumeArchive(
+	ctx context.Context,
+	archiveDir string,
+	tracked []slack.Channel,
+	now time.Time,
+	opts ResumeOptions,
+) (resumeResult, error) {
+	result := resumeResult{fullSweep: opts.Dedupe}
 	resumeArgs, hasWork := e.scopedResumeArgs(ctx, archiveDir, tracked)
 	if !hasWork {
 		fmt.Println("Archive already current")
-		return nil
+		return result, nil
 	}
 
-	now := time.Now()
-	opts := e.resumeOptions(archiveDir, now)
 	if len(resumeArgs) == 0 {
 		fmt.Println("Resuming archive with existing checkpoints")
 	} else {
 		fmt.Printf("Resuming archive with %d scoped entity arg(s)\n", len(resumeArgs))
 	}
 	if err := ResumeArchive(ctx, e.slackdump, archiveDir, resumeArgs, opts); err != nil {
-		return fmt.Errorf("resuming archive: %w", err)
+		return result, fmt.Errorf("resuming archive: %w", err)
 	}
-	if opts.SkipStaleThreads == "" && opts.SkipStaleChannels == "" {
+	if opts.Dedupe {
 		if err := markFullSweep(archiveDir, now); err != nil {
-			return err
+			return result, err
 		}
+		return result, nil
 	}
-	return nil
+	changedIDs, err := changedResumeChannelIDs(archiveDir)
+	if err != nil {
+		return result, fmt.Errorf("loading changed resume channels: %w", err)
+	}
+	result.changedChannelIDs = changedIDs
+	return result, nil
 }
 
 func (e *Exporter) trackedChannels(ctx context.Context) ([]slack.Channel, error) {
@@ -236,7 +262,10 @@ func (e *Exporter) trackedChannels(ctx context.Context) ([]slack.Channel, error)
 }
 
 func (e *Exporter) resumeOptions(archiveDir string, now time.Time) ResumeOptions {
-	fullSweep := fullSweepDue(archiveDir, e.cfg.FullSweepInterval, now)
+	return e.resumeOptionsForFullSweep(fullSweepDue(archiveDir, e.cfg.FullSweepInterval, now))
+}
+
+func (e *Exporter) resumeOptionsForFullSweep(fullSweep bool) ResumeOptions {
 	opts := ResumeOptions{
 		Lookback:            e.cfg.Lookback,
 		SkipStaleThreads:    e.cfg.SkipStaleThreads,
@@ -388,6 +417,20 @@ func channelIDs(chans []slack.Channel) []string {
 	ids := make([]string, 0, len(chans))
 	for _, ch := range chans {
 		ids = append(ids, ch.ID)
+	}
+	return ids
+}
+
+func renderChannelIDsForSync(trackedIDs []string, changedIDs []string, renderAll bool) []string {
+	if renderAll {
+		return trackedIDs
+	}
+	changed := channelIDSet(changedIDs)
+	ids := make([]string, 0, len(changedIDs))
+	for _, id := range trackedIDs {
+		if changed[id] {
+			ids = append(ids, id)
+		}
 	}
 	return ids
 }

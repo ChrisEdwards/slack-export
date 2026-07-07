@@ -2,6 +2,7 @@ package export
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/chrisedwards/slack-export/internal/config"
 	"github.com/chrisedwards/slack-export/internal/slack"
+	"github.com/rusq/slackdump/v4/source"
 )
 
 func TestExporter_Config(t *testing.T) {
@@ -392,6 +394,102 @@ func TestResumeOptions_DedupeOnlyOnFullSweep(t *testing.T) {
 
 func ptrTime(t time.Time) *time.Time {
 	return &t
+}
+
+func TestChangedResumeChannelIDs_UsesNewestFinishedResumeSession(t *testing.T) {
+	archiveDir := t.TempDir()
+	db := openTestArchiveDB(t, archiveDir)
+	defer func() { _ = db.Close() }()
+
+	execTestSQL(t, db, `CREATE TABLE SESSION (ID INTEGER PRIMARY KEY, FINISHED SMALLINT, MODE TEXT NOT NULL)`)
+	execTestSQL(t, db, `
+		CREATE TABLE CHUNK (
+			ID INTEGER PRIMARY KEY,
+			SESSION_ID INTEGER NOT NULL,
+			NUM_REC INTEGER NOT NULL DEFAULT 0,
+			CHANNEL_ID TEXT
+		)
+	`)
+	execTestSQL(t, db, `
+		INSERT INTO SESSION (ID, FINISHED, MODE) VALUES
+			(1, 1, 'archive'),
+			(2, 1, 'resume'),
+			(3, 0, 'resume'),
+			(4, 1, 'resume')
+	`)
+	execTestSQL(t, db, `
+		INSERT INTO CHUNK (ID, SESSION_ID, NUM_REC, CHANNEL_ID) VALUES
+			(1, 2, 5, 'C_OLD'),
+			(2, 3, 7, 'C_UNFINISHED'),
+			(3, 4, 1, 'C_ALPHA'),
+			(4, 4, 3, 'C_BETA'),
+			(5, 4, 0, 'C_EMPTY'),
+			(6, 4, 2, NULL),
+			(7, 4, 4, 'C_ALPHA')
+	`)
+
+	got, err := changedResumeChannelIDs(archiveDir)
+	if err != nil {
+		t.Fatalf("changedResumeChannelIDs() error = %v", err)
+	}
+	want := []string{"C_ALPHA", "C_BETA"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("changedResumeChannelIDs() = %v, want %v", got, want)
+	}
+}
+
+func TestRenderChannelIDsForSync(t *testing.T) {
+	tracked := []string{"C_ALPHA", "C_BETA", "C_GAMMA"}
+	tests := []struct {
+		name      string
+		changed   []string
+		renderAll bool
+		want      []string
+	}{
+		{
+			name:      "bootstrap or full sweep renders all tracked channels",
+			changed:   []string{"C_ALPHA"},
+			renderAll: true,
+			want:      tracked,
+		},
+		{
+			name:    "normal run renders changed tracked channels in tracked order",
+			changed: []string{"C_GAMMA", "C_UNTRACKED", "C_ALPHA"},
+			want:    []string{"C_ALPHA", "C_GAMMA"},
+		},
+		{
+			name: "normal run with no changed chunks renders no channels",
+			want: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := renderChannelIDsForSync(tracked, tt.changed, tt.renderAll)
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("renderChannelIDsForSync() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func openTestArchiveDB(t *testing.T, archiveDir string) *sql.DB {
+	t.Helper()
+	if err := os.MkdirAll(archiveDir, 0750); err != nil {
+		t.Fatalf("creating archive dir: %v", err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(archiveDir, source.DefaultDBFile))
+	if err != nil {
+		t.Fatalf("opening sqlite db: %v", err)
+	}
+	return db
+}
+
+func execTestSQL(t *testing.T, db *sql.DB, stmt string) {
+	t.Helper()
+	if _, err := db.Exec(stmt); err != nil {
+		t.Fatalf("executing SQL %q: %v", stmt, err)
+	}
 }
 
 func TestExportDate_InvalidDate(t *testing.T) {
