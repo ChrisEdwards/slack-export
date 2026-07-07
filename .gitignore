@@ -73,3 +73,5 @@ trace.out
 
 # Default export output directory
 /slack-logs/
+
+.orca/
