@@ -333,6 +333,67 @@ func TestScopedResumeArgsFromLatest_NoMovedChannels(t *testing.T) {
 	}
 }
 
+func TestResumeOptions_DedupeOnlyOnFullSweep(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name             string
+		markAt           *time.Time
+		wantDedupe       bool
+		wantSkipStale    string
+		wantSkipChannels string
+	}{
+		{
+			name:             "normal run keeps skip-stale filters and skips dedupe",
+			markAt:           ptrTime(now.Add(-24 * time.Hour)),
+			wantSkipStale:    "21d",
+			wantSkipChannels: "21d",
+		},
+		{
+			name:       "missing marker triggers full sweep and dedupe",
+			wantDedupe: true,
+		},
+		{
+			name:       "expired marker triggers full sweep and dedupe",
+			markAt:     ptrTime(now.Add(-8 * 24 * time.Hour)),
+			wantDedupe: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			archiveDir := t.TempDir()
+			if tt.markAt != nil {
+				if err := markFullSweep(archiveDir, *tt.markAt); err != nil {
+					t.Fatalf("markFullSweep() error = %v", err)
+				}
+			}
+			e := &Exporter{cfg: &config.Config{
+				Lookback:            "7d",
+				SkipStaleThreads:    "21d",
+				SkipStaleChannels:   "21d",
+				SkipCompleteThreads: true,
+				FullSweepInterval:   "7d",
+			}}
+
+			got := e.resumeOptions(archiveDir, now)
+			if got.Dedupe != tt.wantDedupe {
+				t.Fatalf("resumeOptions().Dedupe = %v, want %v", got.Dedupe, tt.wantDedupe)
+			}
+			if got.SkipStaleThreads != tt.wantSkipStale {
+				t.Fatalf("resumeOptions().SkipStaleThreads = %q, want %q", got.SkipStaleThreads, tt.wantSkipStale)
+			}
+			if got.SkipStaleChannels != tt.wantSkipChannels {
+				t.Fatalf("resumeOptions().SkipStaleChannels = %q, want %q", got.SkipStaleChannels, tt.wantSkipChannels)
+			}
+		})
+	}
+}
+
+func ptrTime(t time.Time) *time.Time {
+	return &t
+}
+
 func TestExportDate_InvalidDate(t *testing.T) {
 	e := &Exporter{
 		cfg: &config.Config{Timezone: "America/New_York"},

@@ -236,14 +236,15 @@ func (e *Exporter) trackedChannels(ctx context.Context) ([]slack.Channel, error)
 }
 
 func (e *Exporter) resumeOptions(archiveDir string, now time.Time) ResumeOptions {
+	fullSweep := fullSweepDue(archiveDir, e.cfg.FullSweepInterval, now)
 	opts := ResumeOptions{
 		Lookback:            e.cfg.Lookback,
 		SkipStaleThreads:    e.cfg.SkipStaleThreads,
 		SkipStaleChannels:   e.cfg.SkipStaleChannels,
 		SkipCompleteThreads: e.cfg.SkipCompleteThreads,
-		Dedupe:              true,
+		Dedupe:              fullSweep,
 	}
-	if fullSweepDue(archiveDir, e.cfg.FullSweepInterval, now) {
+	if fullSweep {
 		opts.SkipStaleThreads = ""
 		opts.SkipStaleChannels = ""
 	}
