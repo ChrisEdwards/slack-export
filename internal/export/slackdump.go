@@ -161,9 +161,9 @@ func FindSlackdump() (string, error) {
 type ResumeOptions struct {
 	Lookback            string
 	SkipStaleThreads    string
-	SkipStaleChannels   string
 	SkipCompleteThreads bool
 	Dedupe              bool
+	APIConfigPath       string
 }
 
 // BootstrapArchive creates a persistent slackdump v4 database archive.
@@ -173,6 +173,7 @@ func BootstrapArchive(
 	archiveDir string,
 	channelIDs []string,
 	timeFrom time.Time,
+	apiConfigPath string,
 ) error {
 	if len(channelIDs) == 0 {
 		return errors.New("no channels to archive")
@@ -184,6 +185,9 @@ func BootstrapArchive(
 		"-y",
 		"-o", archiveDir,
 		fmt.Sprintf("-time-from=%s", timeFrom.UTC().Format(slackdumpTimeFormat)),
+	}
+	if apiConfigPath != "" {
+		args = append(args, "-api-config", apiConfigPath)
 	}
 	args = append(args, channelIDs...)
 
@@ -205,14 +209,14 @@ func ResumeArchive(
 	if opts.SkipStaleThreads != "" {
 		args = append(args, "-skip-stale-threads", toISODuration(opts.SkipStaleThreads))
 	}
-	if opts.SkipStaleChannels != "" {
-		args = append(args, "-skip-stale-channels", toISODuration(opts.SkipStaleChannels))
-	}
 	if opts.SkipCompleteThreads {
 		args = append(args, "-skip-complete-threads")
 	}
 	if opts.Dedupe {
 		args = append(args, "-dedupe")
+	}
+	if opts.APIConfigPath != "" {
+		args = append(args, "-api-config", opts.APIConfigPath)
 	}
 	args = append(args, archiveDir)
 	args = append(args, entityArgs...)

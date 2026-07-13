@@ -184,6 +184,82 @@ func TestRenderSourceRange_CanRenderOnlySelectedChannels(t *testing.T) {
 	}
 }
 
+func TestRenderSourceTargets_RendersOnlyRequestedChannelDates(t *testing.T) {
+	src := memoryArchiveSource{
+		channels: []rslack.Channel{
+			{
+				GroupConversation: rslack.GroupConversation{
+					Conversation: rslack.Conversation{ID: "C_ALPHA"},
+					Name:         "alpha",
+				},
+			},
+			{
+				GroupConversation: rslack.GroupConversation{
+					Conversation: rslack.Conversation{ID: "C_BETA"},
+					Name:         "beta",
+				},
+			},
+		},
+		users: []rslack.User{{ID: "U1", Name: "alice", RealName: "Alice"}},
+		messages: map[string][]rslack.Message{
+			"C_ALPHA": {
+				{Msg: rslack.Msg{
+					Type:      "message",
+					User:      "U1",
+					Text:      "Alpha old day",
+					Timestamp: "1782922930.000000",
+				}},
+				{Msg: rslack.Msg{
+					Type:      "message",
+					User:      "U1",
+					Text:      "Alpha recent day should not render",
+					Timestamp: "1783094460.000000",
+				}},
+			},
+			"C_BETA": {
+				{Msg: rslack.Msg{
+					Type:      "message",
+					User:      "U1",
+					Text:      "Beta requested day",
+					Timestamp: "1783094460.000000",
+				}},
+			},
+		},
+	}
+	outputDir := t.TempDir()
+
+	writes, err := renderSourceTargets(
+		context.Background(),
+		src,
+		outputDir,
+		"America/Chicago",
+		nil,
+		[]renderTarget{
+			{channelID: "C_ALPHA", date: "2026-07-01"},
+			{channelID: "C_BETA", date: "2026-07-03"},
+		},
+	)
+	if err != nil {
+		t.Fatalf("renderSourceTargets() error = %v", err)
+	}
+	if writes != 2 {
+		t.Fatalf("writes = %d, want 2", writes)
+	}
+
+	for _, path := range []string{
+		filepath.Join(outputDir, "2026-07-01", "2026-07-01-alpha.md"),
+		filepath.Join(outputDir, "2026-07-03", "2026-07-03-beta.md"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("stat requested render target %s: %v", path, err)
+		}
+	}
+	notRendered := filepath.Join(outputDir, "2026-07-03", "2026-07-03-alpha.md")
+	if _, err := os.Stat(notRendered); !os.IsNotExist(err) {
+		t.Fatalf("unrequested channel-date should not be written, stat err = %v", err)
+	}
+}
+
 func TestRenderSourceRange_ReusesArchiveReadsAcrossDates(t *testing.T) {
 	src := &countingArchiveSource{
 		memoryArchiveSource: memoryArchiveSource{

@@ -74,7 +74,7 @@ func TestBootstrapArchive_EmptyChannels(t *testing.T) {
 	ctx := context.Background()
 	timeFrom := time.Date(2026, 1, 22, 0, 0, 0, 0, time.UTC)
 
-	err := BootstrapArchive(ctx, "/nonexistent/slackdump", t.TempDir(), nil, timeFrom)
+	err := BootstrapArchive(ctx, "/nonexistent/slackdump", t.TempDir(), nil, timeFrom, "")
 	if err == nil {
 		t.Fatal("BootstrapArchive() with empty channels should return error")
 	}
@@ -82,7 +82,7 @@ func TestBootstrapArchive_EmptyChannels(t *testing.T) {
 		t.Errorf("error %q should mention 'no channels to archive'", err.Error())
 	}
 
-	err = BootstrapArchive(ctx, "/nonexistent/slackdump", t.TempDir(), []string{}, timeFrom)
+	err = BootstrapArchive(ctx, "/nonexistent/slackdump", t.TempDir(), []string{}, timeFrom, "")
 	if err == nil {
 		t.Fatal("BootstrapArchive() with empty slice should return error")
 	}
@@ -102,8 +102,9 @@ func TestBootstrapArchive_CommandShape(t *testing.T) {
 	}
 
 	archiveDir := filepath.Join(tmpDir, "archive")
+	apiConfigPath := filepath.Join(tmpDir, "slackdump-api-limits.yaml")
 	seed := time.Date(2026, 1, 22, 8, 0, 0, 0, time.UTC)
-	err := BootstrapArchive(context.Background(), fakeBin, archiveDir, []string{"C123", "D456"}, seed)
+	err := BootstrapArchive(context.Background(), fakeBin, archiveDir, []string{"C123", "D456"}, seed, apiConfigPath)
 	if err != nil {
 		t.Fatalf("BootstrapArchive() error = %v", err)
 	}
@@ -118,6 +119,7 @@ func TestBootstrapArchive_CommandShape(t *testing.T) {
 		"-y",
 		"-o", archiveDir,
 		"-time-from=2026-01-22T08:00:00",
+		"-api-config", apiConfigPath,
 		"C123",
 		"D456",
 		"",
@@ -144,9 +146,9 @@ func TestResumeArchive_CommandShape(t *testing.T) {
 	opts := ResumeOptions{
 		Lookback:            "7d",
 		SkipStaleThreads:    "21d",
-		SkipStaleChannels:   "21d",
 		SkipCompleteThreads: true,
 		Dedupe:              true,
+		APIConfigPath:       filepath.Join(tmpDir, "slackdump-api-limits.yaml"),
 	}
 	err := ResumeArchive(context.Background(), fakeBin, archiveDir, []string{"C123"}, opts)
 	if err != nil {
@@ -162,9 +164,9 @@ func TestResumeArchive_CommandShape(t *testing.T) {
 		"-threads",
 		"-lookback", "p7d",
 		"-skip-stale-threads", "p21d",
-		"-skip-stale-channels", "p21d",
 		"-skip-complete-threads",
 		"-dedupe",
+		"-api-config", opts.APIConfigPath,
 		archiveDir,
 		"C123",
 		"",
@@ -174,11 +176,34 @@ func TestResumeArchive_CommandShape(t *testing.T) {
 	}
 }
 
+func TestWriteSweepAPIConfig_TunesTier3Pacing(t *testing.T) {
+	path, err := writeSweepAPIConfig(t.TempDir())
+	if err != nil {
+		t.Fatalf("writeSweepAPIConfig() error = %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading API config: %v", err)
+	}
+	text := string(got)
+	for _, want := range []string{
+		"[tier_3]",
+		"  boost = 0",
+		"  burst = 1",
+		"  retries = 10",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("sweep API config missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestBootstrapArchive_InvalidBinary(t *testing.T) {
 	ctx := context.Background()
 	timeFrom := time.Date(2026, 1, 22, 0, 0, 0, 0, time.UTC)
 
-	err := BootstrapArchive(ctx, "/nonexistent/slackdump", t.TempDir(), []string{"C123"}, timeFrom)
+	err := BootstrapArchive(ctx, "/nonexistent/slackdump", t.TempDir(), []string{"C123"}, timeFrom, "")
 	if err == nil {
 		t.Fatal("BootstrapArchive() with nonexistent binary should return error")
 	}

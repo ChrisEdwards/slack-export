@@ -21,9 +21,7 @@ type Config struct {
 	SeedDate            string   `yaml:"seed_date" mapstructure:"seed_date"`
 	Lookback            string   `yaml:"lookback" mapstructure:"lookback"`
 	SkipStaleThreads    string   `yaml:"skip_stale_threads" mapstructure:"skip_stale_threads"`
-	SkipStaleChannels   string   `yaml:"skip_stale_channels" mapstructure:"skip_stale_channels"`
 	SkipCompleteThreads bool     `yaml:"skip_complete_threads" mapstructure:"skip_complete_threads"`
-	FullSweepInterval   string   `yaml:"full_sweep_interval" mapstructure:"full_sweep_interval"`
 
 	configFile string // path to the config file used (if any)
 }
@@ -45,9 +43,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("seed_date", "")
 	v.SetDefault("lookback", "7d")
 	v.SetDefault("skip_stale_threads", "21d")
-	v.SetDefault("skip_stale_channels", "21d")
 	v.SetDefault("skip_complete_threads", true)
-	v.SetDefault("full_sweep_interval", "7d")
 
 	v.SetEnvPrefix("SLACK_EXPORT")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))

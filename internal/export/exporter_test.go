@@ -335,68 +335,189 @@ func TestScopedResumeArgsFromLatest_NoMovedChannels(t *testing.T) {
 	}
 }
 
-func TestResumeOptions_DedupeOnlyOnFullSweep(t *testing.T) {
-	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+func TestFullSweepResumeArgsFromLatest_ExcludesUntrackedAndBoundsMissingTracked(t *testing.T) {
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	coverageStart := time.Date(2026, 7, 3, 7, 0, 0, 0, time.UTC)
+	tracked := []slack.Channel{
+		{ID: "C_TRACKED"},
+		{ID: "C_NEW"},
+	}
+	latest := map[testSlackLink]time.Time{
+		"C_TRACKED":           now,
+		"C_TRACKED:111.111":   now,
+		"C_UNTRACKED":         now,
+		"C_UNTRACKED:222.222": now,
+	}
 
+	got := fullSweepResumeArgsFromLatest(tracked, latest, coverageStart)
+	sort.Strings(got)
+	want := []string{
+		"C_NEW,2026-07-03T07:00:00",
+		"^C_UNTRACKED",
+		"^C_UNTRACKED:222.222",
+	}
+	sort.Strings(want)
+
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("fullSweepResumeArgsFromLatest() = %v, want %v", got, want)
+	}
+}
+
+func TestResumeOptions_ModeSplitIgnoresOldFullSweepMarker(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
-		name             string
-		markAt           *time.Time
-		wantDedupe       bool
-		wantSkipStale    string
-		wantSkipChannels string
+		name              string
+		opts              SyncOptions
+		wantLookback      string
+		wantDedupe        bool
+		wantSkipStale     string
+		wantSkipComplete  bool
+		wantAPIConfigPath bool
 	}{
 		{
-			name:             "normal run keeps skip-stale filters and skips dedupe",
-			markAt:           ptrTime(now.Add(-24 * time.Hour)),
+			name:             "daily run keeps configured recent options and skips dedupe",
+			wantLookback:     "7d",
 			wantSkipStale:    "21d",
-			wantSkipChannels: "21d",
+			wantSkipComplete: true,
 		},
 		{
-			name:       "missing marker triggers full sweep and dedupe",
-			wantDedupe: true,
-		},
-		{
-			name:       "expired marker triggers full sweep and dedupe",
-			markAt:     ptrTime(now.Add(-8 * 24 * time.Hour)),
-			wantDedupe: true,
+			name:              "full run always uses bounded sweep options",
+			opts:              SyncOptions{Full: true},
+			wantLookback:      "90d",
+			wantDedupe:        true,
+			wantSkipStale:     "90d",
+			wantSkipComplete:  true,
+			wantAPIConfigPath: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			archiveDir := t.TempDir()
-			if tt.markAt != nil {
-				if err := markFullSweep(archiveDir, *tt.markAt); err != nil {
-					t.Fatalf("markFullSweep() error = %v", err)
-				}
+			oldMarkerPath := filepath.Join(archiveDir, ".slack-export-last-full-sweep")
+			if err := os.WriteFile(oldMarkerPath, []byte(now.Add(-30*24*time.Hour).Format(time.RFC3339)), 0600); err != nil {
+				t.Fatalf("writing old marker: %v", err)
 			}
 			e := &Exporter{cfg: &config.Config{
 				Lookback:            "7d",
 				SkipStaleThreads:    "21d",
-				SkipStaleChannels:   "21d",
 				SkipCompleteThreads: true,
-				FullSweepInterval:   "7d",
 			}}
 
-			got := e.resumeOptions(archiveDir, now)
+			got, err := e.resumeOptions(archiveDir, tt.opts)
+			if err != nil {
+				t.Fatalf("resumeOptions() error = %v", err)
+			}
+			if got.Lookback != tt.wantLookback {
+				t.Fatalf("resumeOptions().Lookback = %q, want %q", got.Lookback, tt.wantLookback)
+			}
 			if got.Dedupe != tt.wantDedupe {
 				t.Fatalf("resumeOptions().Dedupe = %v, want %v", got.Dedupe, tt.wantDedupe)
 			}
 			if got.SkipStaleThreads != tt.wantSkipStale {
 				t.Fatalf("resumeOptions().SkipStaleThreads = %q, want %q", got.SkipStaleThreads, tt.wantSkipStale)
 			}
-			if got.SkipStaleChannels != tt.wantSkipChannels {
-				t.Fatalf("resumeOptions().SkipStaleChannels = %q, want %q", got.SkipStaleChannels, tt.wantSkipChannels)
+			if got.SkipCompleteThreads != tt.wantSkipComplete {
+				t.Fatalf("resumeOptions().SkipCompleteThreads = %v, want %v", got.SkipCompleteThreads, tt.wantSkipComplete)
+			}
+			if (got.APIConfigPath != "") != tt.wantAPIConfigPath {
+				t.Fatalf("resumeOptions().APIConfigPath = %q, want path? %v", got.APIConfigPath, tt.wantAPIConfigPath)
 			}
 		})
 	}
 }
 
-func ptrTime(t time.Time) *time.Time {
-	return &t
+func TestAcquireArchiveLock_UsesSiblingPathAndIsNonBlocking(t *testing.T) {
+	archiveDir := filepath.Join(t.TempDir(), "workspace-archive")
+	first, acquired, err := acquireArchiveLock(archiveDir)
+	if err != nil {
+		t.Fatalf("acquireArchiveLock() first error = %v", err)
+	}
+	if !acquired {
+		t.Fatal("first acquire should succeed")
+	}
+	defer func() { _ = first.Release() }()
+
+	if _, err := os.Stat(archiveDir + ".lock"); err != nil {
+		t.Fatalf("lock file should be sibling path: %v", err)
+	}
+
+	second, acquired, err := acquireArchiveLock(archiveDir)
+	if err != nil {
+		t.Fatalf("acquireArchiveLock() second error = %v", err)
+	}
+	if acquired {
+		_ = second.Release()
+		t.Fatal("second acquire should report contention without blocking")
+	}
+
+	if err := first.Release(); err != nil {
+		t.Fatalf("releasing first lock: %v", err)
+	}
+	third, acquired, err := acquireArchiveLock(archiveDir)
+	if err != nil {
+		t.Fatalf("acquireArchiveLock() third error = %v", err)
+	}
+	if !acquired {
+		t.Fatal("third acquire should succeed after release")
+	}
+	if err := third.Release(); err != nil {
+		t.Fatalf("releasing third lock: %v", err)
+	}
 }
 
-func TestChangedResumeChannelIDs_UsesNewestFinishedResumeSession(t *testing.T) {
+func TestSync_DailyContentionSkipsBeforeFetchingSlack(t *testing.T) {
+	baseDir := t.TempDir()
+	cfg := &config.Config{
+		ArchiveDir: baseDir,
+		OutputDir:  filepath.Join(t.TempDir(), "out"),
+		Timezone:   "America/New_York",
+	}
+	e := &Exporter{
+		cfg:   cfg,
+		creds: &slack.Credentials{Workspace: "locked-team"},
+	}
+	archiveDir, err := e.ArchiveDir()
+	if err != nil {
+		t.Fatalf("ArchiveDir() error = %v", err)
+	}
+	lock, acquired, err := acquireArchiveLock(archiveDir)
+	if err != nil {
+		t.Fatalf("acquireArchiveLock() error = %v", err)
+	}
+	if !acquired {
+		t.Fatal("setup lock should acquire")
+	}
+	defer func() { _ = lock.Release() }()
+
+	if err := e.Sync(context.Background(), time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC), SyncOptions{}); err != nil {
+		t.Fatalf("daily Sync() under contention error = %v", err)
+	}
+}
+
+func TestMarkSweepSuccess_WritesLastSuccessHealthMarker(t *testing.T) {
+	archiveDir := t.TempDir()
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+
+	if err := markSweepSuccess(archiveDir, now); err != nil {
+		t.Fatalf("markSweepSuccess() error = %v", err)
+	}
+	got, ok, err := lastSweepSuccess(archiveDir)
+	if err != nil {
+		t.Fatalf("lastSweepSuccess() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("lastSweepSuccess() ok = false, want true")
+	}
+	if !got.Equal(now) {
+		t.Fatalf("lastSweepSuccess() = %s, want %s", got, now)
+	}
+	if _, err := os.Stat(filepath.Join(archiveDir, ".slack-export-last-full-sweep")); !os.IsNotExist(err) {
+		t.Fatalf("old re-escalation marker should not be written, stat err = %v", err)
+	}
+}
+
+func TestWrittenResumeRenderTargets_UsesLatestFinishedResumeMessageDates(t *testing.T) {
 	archiveDir := t.TempDir()
 	db := openTestArchiveDB(t, archiveDir)
 	defer func() { _ = db.Close() }()
@@ -411,66 +532,58 @@ func TestChangedResumeChannelIDs_UsesNewestFinishedResumeSession(t *testing.T) {
 		)
 	`)
 	execTestSQL(t, db, `
+		CREATE TABLE MESSAGE (
+			ID INTEGER NOT NULL,
+			CHUNK_ID INTEGER NOT NULL,
+			CHANNEL_ID TEXT NOT NULL,
+			TS TEXT NOT NULL,
+			IDX INTEGER NOT NULL,
+			DATA BLOB NOT NULL,
+			PRIMARY KEY (ID, CHUNK_ID)
+		)
+	`)
+	execTestSQL(t, db, `
 		INSERT INTO SESSION (ID, FINISHED, MODE) VALUES
-			(1, 1, 'archive'),
-			(2, 1, 'resume'),
-			(3, 0, 'resume'),
-			(4, 1, 'resume')
+			(1, 1, 'resume'),
+			(2, 0, 'resume'),
+			(3, 1, 'resume')
 	`)
 	execTestSQL(t, db, `
 		INSERT INTO CHUNK (ID, SESSION_ID, NUM_REC, CHANNEL_ID) VALUES
-			(1, 2, 5, 'C_OLD'),
-			(2, 3, 7, 'C_UNFINISHED'),
-			(3, 4, 1, 'C_ALPHA'),
-			(4, 4, 3, 'C_BETA'),
-			(5, 4, 0, 'C_EMPTY'),
-			(6, 4, 2, NULL),
-			(7, 4, 4, 'C_ALPHA')
+			(10, 1, 1, 'C_OLD'),
+			(20, 2, 1, 'C_UNFINISHED'),
+			(30, 3, 2, 'C_ALPHA'),
+			(31, 3, 1, 'C_BETA')
+	`)
+	execTestSQL(t, db, `
+		INSERT INTO MESSAGE (ID, CHUNK_ID, CHANNEL_ID, TS, IDX, DATA) VALUES
+			(1, 10, 'C_OLD', '1782922930.000000', 0, '{}'),
+			(2, 20, 'C_UNFINISHED', '1783094460.000000', 0, '{}'),
+			(3, 30, 'C_ALPHA', '1782922930.000000', 0, '{}'),
+			(4, 30, 'C_ALPHA', '1783063800.000000', 1, '{}'),
+			(5, 31, 'C_BETA', '1783094460.000000', 0, '{}')
 	`)
 
-	got, err := changedResumeChannelIDs(archiveDir)
+	got, err := writtenResumeRenderTargets(archiveDir, "America/Chicago")
 	if err != nil {
-		t.Fatalf("changedResumeChannelIDs() error = %v", err)
+		t.Fatalf("writtenResumeRenderTargets() error = %v", err)
 	}
-	want := []string{"C_ALPHA", "C_BETA"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("changedResumeChannelIDs() = %v, want %v", got, want)
+	want := []renderTarget{
+		{channelID: "C_ALPHA", date: "2026-07-01"},
+		{channelID: "C_ALPHA", date: "2026-07-02"},
+		{channelID: "C_BETA", date: "2026-07-03"},
+	}
+	if strings.Join(renderTargetsForTest(got), "|") != strings.Join(renderTargetsForTest(want), "|") {
+		t.Fatalf("writtenResumeRenderTargets() = %v, want %v", got, want)
 	}
 }
 
-func TestRenderChannelIDsForSync(t *testing.T) {
-	tracked := []string{"C_ALPHA", "C_BETA", "C_GAMMA"}
-	tests := []struct {
-		name      string
-		changed   []string
-		renderAll bool
-		want      []string
-	}{
-		{
-			name:      "bootstrap or full sweep renders all tracked channels",
-			changed:   []string{"C_ALPHA"},
-			renderAll: true,
-			want:      tracked,
-		},
-		{
-			name:    "normal run renders changed tracked channels in tracked order",
-			changed: []string{"C_GAMMA", "C_UNTRACKED", "C_ALPHA"},
-			want:    []string{"C_ALPHA", "C_GAMMA"},
-		},
-		{
-			name: "normal run with no changed chunks renders no channels",
-			want: []string{},
-		},
+func renderTargetsForTest(targets []renderTarget) []string {
+	formatted := make([]string, 0, len(targets))
+	for _, target := range targets {
+		formatted = append(formatted, target.channelID+":"+target.date)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := renderChannelIDsForSync(tracked, tt.changed, tt.renderAll)
-			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
-				t.Fatalf("renderChannelIDsForSync() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	return formatted
 }
 
 func openTestArchiveDB(t *testing.T, archiveDir string) *sql.DB {

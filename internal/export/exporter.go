@@ -24,6 +24,10 @@ type Exporter struct {
 	creds      *slack.Credentials
 }
 
+type SyncOptions struct {
+	Full bool
+}
+
 // NewExporter creates an Exporter with Slack credentials, Edge API, and slackdump.
 func NewExporter(cfg *config.Config) (*Exporter, error) {
 	creds, err := slack.LoadCredentials()
@@ -138,8 +142,28 @@ func (e *Exporter) ExportRange(ctx context.Context, from, to string) error {
 	return nil
 }
 
-// Sync refreshes the persistent archive and renders the recent change window.
-func (e *Exporter) Sync(ctx context.Context, now time.Time) error {
+// Sync refreshes the persistent archive and renders changed markdown files.
+func (e *Exporter) Sync(ctx context.Context, now time.Time, syncOpts SyncOptions) error {
+	archiveDir, err := e.ArchiveDir()
+	if err != nil {
+		return err
+	}
+	lock, acquired, err := acquireArchiveLock(archiveDir)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		if syncOpts.Full {
+			return errors.New("archive refresh already in progress")
+		}
+		fmt.Println("refresh/render skipped, sweep active")
+		return nil
+	}
+	defer func() { _ = lock.Release() }()
+	if !syncOpts.Full {
+		warnIfSweepStale(archiveDir, now)
+	}
+
 	tracked, err := e.trackedChannels(ctx)
 	if err != nil {
 		return err
@@ -149,12 +173,9 @@ func (e *Exporter) Sync(ctx context.Context, now time.Time) error {
 		return nil
 	}
 
-	archiveDir, err := e.ArchiveDir()
-	if err != nil {
-		return err
-	}
 	ids := channelIDs(tracked)
 	renderIDs := ids
+	var renderTargets []renderTarget
 
 	if !archiveExists(archiveDir) {
 		seedDate, err := e.seedDate(now)
@@ -166,22 +187,46 @@ func (e *Exporter) Sync(ctx context.Context, now time.Time) error {
 			return fmt.Errorf("calculating seed date bounds: %w", err)
 		}
 		fmt.Printf("Bootstrapping archive from %s into %s\n", seedDate, archiveDir)
-		if err := BootstrapArchive(ctx, e.slackdump, archiveDir, ids, seedStart); err != nil {
+		apiConfigPath := ""
+		if syncOpts.Full {
+			apiConfigPath, err = writeSweepAPIConfig(archiveDir)
+			if err != nil {
+				return err
+			}
+		}
+		if err := BootstrapArchive(ctx, e.slackdump, archiveDir, ids, seedStart, apiConfigPath); err != nil {
 			return fmt.Errorf("bootstrapping archive: %w", err)
 		}
-		if err := markFullSweep(archiveDir, now); err != nil {
+		if err := markSweepSuccess(archiveDir, now); err != nil {
 			return err
 		}
 	} else {
-		opts := e.resumeOptions(archiveDir, now)
+		opts, err := e.resumeOptions(archiveDir, syncOpts)
+		if err != nil {
+			return err
+		}
 		resume, err := e.resumeArchive(ctx, archiveDir, tracked, now, opts)
 		if err != nil {
 			return err
 		}
-		renderIDs = renderChannelIDsForSync(ids, resume.changedChannelIDs, resume.fullSweep)
+		renderTargets = resume.renderTargets
 	}
 	if err := saveChannelNames(archiveDir, tracked); err != nil {
 		return fmt.Errorf("saving channel names: %w", err)
+	}
+
+	if renderTargets != nil {
+		writes, err := RenderArchiveTargets(ctx, archiveDir, e.cfg.OutputDir, e.cfg.Timezone, renderTargets)
+		if err != nil {
+			return err
+		}
+		from, to := renderTargetDateRange(renderTargets)
+		if from == "" {
+			fmt.Println("Rendered changed archive rows (0 changed file(s))")
+		} else {
+			fmt.Printf("Rendered changed archive rows for %s through %s (%d changed file(s))\n", from, to, writes)
+		}
+		return nil
 	}
 
 	from, to, err := e.renderWindow(now)
@@ -201,8 +246,7 @@ func (e *Exporter) Sync(ctx context.Context, now time.Time) error {
 }
 
 type resumeResult struct {
-	changedChannelIDs []string
-	fullSweep         bool
+	renderTargets []renderTarget
 }
 
 func (e *Exporter) resumeArchive(
@@ -212,8 +256,11 @@ func (e *Exporter) resumeArchive(
 	now time.Time,
 	opts ResumeOptions,
 ) (resumeResult, error) {
-	result := resumeResult{fullSweep: opts.Dedupe}
-	resumeArgs, hasWork := e.scopedResumeArgs(ctx, archiveDir, tracked)
+	result := resumeResult{}
+	resumeArgs, hasWork, err := e.resumeArgs(ctx, archiveDir, tracked, opts)
+	if err != nil {
+		return result, err
+	}
 	if !hasWork {
 		fmt.Println("Archive already current")
 		return result, nil
@@ -228,16 +275,15 @@ func (e *Exporter) resumeArchive(
 		return result, fmt.Errorf("resuming archive: %w", err)
 	}
 	if opts.Dedupe {
-		if err := markFullSweep(archiveDir, now); err != nil {
+		if err := markSweepSuccess(archiveDir, now); err != nil {
 			return result, err
 		}
-		return result, nil
 	}
-	changedIDs, err := changedResumeChannelIDs(archiveDir)
+	targets, err := writtenResumeRenderTargets(archiveDir, e.cfg.Timezone)
 	if err != nil {
-		return result, fmt.Errorf("loading changed resume channels: %w", err)
+		return result, fmt.Errorf("loading written resume render targets: %w", err)
 	}
-	result.changedChannelIDs = changedIDs
+	result.renderTargets = targets
 	return result, nil
 }
 
@@ -261,23 +307,25 @@ func (e *Exporter) trackedChannels(ctx context.Context) ([]slack.Channel, error)
 	return channels.FilterChannels(allChannels, e.cfg.Include, e.cfg.Exclude), nil
 }
 
-func (e *Exporter) resumeOptions(archiveDir string, now time.Time) ResumeOptions {
-	return e.resumeOptionsForFullSweep(fullSweepDue(archiveDir, e.cfg.FullSweepInterval, now))
-}
-
-func (e *Exporter) resumeOptionsForFullSweep(fullSweep bool) ResumeOptions {
-	opts := ResumeOptions{
+func (e *Exporter) resumeOptions(archiveDir string, syncOpts SyncOptions) (ResumeOptions, error) {
+	if syncOpts.Full {
+		apiConfigPath, err := writeSweepAPIConfig(archiveDir)
+		if err != nil {
+			return ResumeOptions{}, err
+		}
+		return ResumeOptions{
+			Lookback:            "90d",
+			SkipStaleThreads:    "90d",
+			SkipCompleteThreads: true,
+			Dedupe:              true,
+			APIConfigPath:       apiConfigPath,
+		}, nil
+	}
+	return ResumeOptions{
 		Lookback:            e.cfg.Lookback,
 		SkipStaleThreads:    e.cfg.SkipStaleThreads,
-		SkipStaleChannels:   e.cfg.SkipStaleChannels,
 		SkipCompleteThreads: e.cfg.SkipCompleteThreads,
-		Dedupe:              fullSweep,
-	}
-	if fullSweep {
-		opts.SkipStaleThreads = ""
-		opts.SkipStaleChannels = ""
-	}
-	return opts
+	}, nil
 }
 
 func (e *Exporter) scopedResumeArgs(ctx context.Context, archiveDir string, tracked []slack.Channel) ([]string, bool) {
@@ -421,18 +469,36 @@ func channelIDs(chans []slack.Channel) []string {
 	return ids
 }
 
-func renderChannelIDsForSync(trackedIDs []string, changedIDs []string, renderAll bool) []string {
-	if renderAll {
-		return trackedIDs
+func renderTargetDateRange(targets []renderTarget) (string, string) {
+	if len(targets) == 0 {
+		return "", ""
 	}
-	changed := channelIDSet(changedIDs)
-	ids := make([]string, 0, len(changedIDs))
-	for _, id := range trackedIDs {
-		if changed[id] {
-			ids = append(ids, id)
+	from, to := targets[0].date, targets[0].date
+	for _, target := range targets[1:] {
+		if target.date < from {
+			from = target.date
+		}
+		if target.date > to {
+			to = target.date
 		}
 	}
-	return ids
+	return from, to
+}
+
+func warnIfSweepStale(archiveDir string, now time.Time) {
+	last, ok, err := lastSweepSuccess(archiveDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to read last full sweep success: %v\n", err)
+		return
+	}
+	if !ok {
+		fmt.Fprintln(os.Stderr, "Warning: no successful full sweep recorded; schedule slack-export sync --full")
+		return
+	}
+	if now.Sub(last) > 30*24*time.Hour {
+		fmt.Fprintf(os.Stderr, "Warning: last successful full sweep was %s; schedule slack-export sync --full\n",
+			last.Format("2006-01-02"))
+	}
 }
 
 func channelIDSet(ids []string) map[string]bool {

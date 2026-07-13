@@ -138,6 +138,13 @@ func TestSyncCmd_UsageAndHelp(t *testing.T) {
 	}
 }
 
+func TestSyncCmd_FullFlag(t *testing.T) {
+	fullFlag := syncCmd.Flags().Lookup("full")
+	if fullFlag == nil {
+		t.Error("sync command should have --full flag")
+	}
+}
+
 func TestRenderCmd_Registered(t *testing.T) {
 	found := false
 	for _, cmd := range rootCmd.Commands() {

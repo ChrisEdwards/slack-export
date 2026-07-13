@@ -31,6 +31,8 @@ var (
 
 var cfgFile string
 
+const dailySyncTimeout = 20 * time.Minute
+
 var rootCmd = &cobra.Command{
 	Use:   "slack-export",
 	Short: "Export Slack channel logs to dated markdown files",
@@ -119,6 +121,7 @@ func init() {
 	exportCmd.Flags().String("to", "", "End date (YYYY-MM-DD), defaults to today")
 	rootCmd.AddCommand(exportCmd)
 
+	syncCmd.Flags().Bool("full", false, "Run the bounded full archive sweep")
 	rootCmd.AddCommand(syncCmd)
 
 	renderCmd.Flags().Bool("full", false, "Render every date from seed_date through today")
@@ -195,7 +198,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 	return exporter.ExportRange(ctx, from, to)
 }
 
-func runSync(_ *cobra.Command, _ []string) error {
+func runSync(cmd *cobra.Command, _ []string) error {
 	cfg, err := config.Load(cfgFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -209,7 +212,15 @@ func runSync(_ *cobra.Command, _ []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	return exporter.Sync(ctx, time.Now())
+	full, _ := cmd.Flags().GetBool("full")
+	syncCtx := ctx
+	if !full {
+		var timeoutCancel context.CancelFunc
+		syncCtx, timeoutCancel = context.WithTimeout(ctx, dailySyncTimeout)
+		defer timeoutCancel()
+	}
+
+	return exporter.Sync(syncCtx, time.Now(), export.SyncOptions{Full: full})
 }
 
 func runRender(cmd *cobra.Command, _ []string) error {
@@ -644,12 +655,11 @@ func initStepConfig() (*config.Config, string, error) {
 
 	// Create and save config
 	cfg := &config.Config{
-		OutputDir:         outputDir,
-		Timezone:          timezone,
-		ArchiveDir:        "~/.local/share/slack-export/archive",
-		Lookback:          "7d",
-		SkipStaleThreads:  "21d",
-		FullSweepInterval: "7d",
+		OutputDir:        outputDir,
+		Timezone:         timezone,
+		ArchiveDir:       "~/.local/share/slack-export/archive",
+		Lookback:         "7d",
+		SkipStaleThreads: "21d",
 	}
 
 	if err := cfg.Save(configPath); err != nil {

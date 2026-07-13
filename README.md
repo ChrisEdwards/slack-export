@@ -24,7 +24,7 @@ Each file contains that day's messages in clean, readable markdown. Filenames in
 
 ## Features
 
-- **Daily sync** - resumes a persistent local archive and renders recent changes
+- **Daily sync** - resumes a persistent local archive and renders written changes
 - **Glob filtering** - include/exclude channels by pattern (e.g., `team-*`, `*-alerts`)
 - **Human-readable DMs** - `dm_alice` instead of `dm_U015ANT8LLD`
 - **Timezone-aware** - accurate date boundaries for your location
@@ -75,9 +75,11 @@ Re-run with `--force` to reconfigure anytime.
 slack-export sync
 ```
 
-On first run, `sync` bootstraps a local slackdump v4 database archive, then renders markdown files from that archive. Later runs use `slackdump resume -threads` to fetch new messages and late thread replies, then re-render the recent lookback window.
+On first run, `sync` bootstraps a local slackdump v4 database archive, then renders markdown files from that archive. Later runs use `slackdump resume -threads` to fetch new messages and late thread replies, then render the channel/day files for rows written by that resume.
 
 Run `slack-export sync` daily (or add it to a cron job) to keep your logs up to date.
+
+Run `slack-export sync --full` from a separate off-hours schedule for the bounded full sweep. Full sweeps use a 90-day lookback, revisit stale threads up to 90 days, dedupe the archive, and render the rows that sweep wrote. Daily and full syncs share an archive lock; if a full sweep is active, a daily sync skips refresh and render instead of emitting partial markdown.
 
 ### Backfilling history
 
@@ -147,14 +149,12 @@ archive_dir: ~/.local/share/slack-export/archive
 seed_date: ""                # YYYY-MM-DD; empty starts from existing output or today
 lookback: 7d                 # recent render window
 skip_stale_threads: 21d      # "" disables stale-thread skipping
-skip_stale_channels: 21d     # "" disables stale-channel skipping
 skip_complete_threads: true  # skip complete thread refreshes during resume
-full_sweep_interval: 7d      # "" disables scheduled full sweeps
 ```
 
 The archive is stored under `archive_dir` by workspace name. Dates before `seed_date` cannot be rendered from the archive; create a fresh archive with an earlier seed date when you need older history.
 
-Any day file inside the render window can change on a later sync as threads evolve or recent messages are edited. Downstream consumers should use fingerprints or mtimes instead of treating rendered day files as immutable.
+Any day file touched by a later sync can change as threads evolve or recent messages are edited. Downstream consumers should use fingerprints or mtimes instead of treating rendered day files as immutable.
 
 ## Configuration
 
@@ -275,12 +275,15 @@ slack-export export --from 2026-01-15 --to 2026-01-20
 
 ```bash
 slack-export sync
+slack-export sync --full
 ```
 
 The sync command:
 1. Creates the workspace archive on first run
 2. Resumes the archive with new messages and thread replies
-3. Renders the lookback window to dated markdown files
+3. Renders dated markdown files for rows written by the resume
+
+Use `sync --full` from an off-hours weekly schedule. It always runs the bounded sweep instead of relying on `sync` to decide when a sweep is due.
 
 ### Render From Local Archive
 

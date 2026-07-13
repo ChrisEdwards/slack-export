@@ -76,6 +76,29 @@ func RenderArchiveRangeForChannels(
 	return renderSourceRange(ctx, src, outputDir, from, to, timezone, channelNames, channelIDs)
 }
 
+func RenderArchiveTargets(
+	ctx context.Context,
+	archiveDir string,
+	outputDir string,
+	timezone string,
+	targets []renderTarget,
+) (int, error) {
+	if len(targets) == 0 {
+		return 0, nil
+	}
+	src, err := LoadArchiveSource(ctx, archiveDir)
+	if err != nil {
+		return 0, fmt.Errorf("loading archive source: %w", err)
+	}
+	defer func() { _ = src.Close() }()
+
+	channelNames, err := loadChannelNames(archiveDir)
+	if err != nil {
+		return 0, fmt.Errorf("loading channel names: %w", err)
+	}
+	return renderSourceTargets(ctx, src, outputDir, timezone, channelNames, targets)
+}
+
 // RenderSourceRange renders all channels from an already opened source.
 func RenderSourceRange(
 	ctx context.Context,
@@ -145,6 +168,78 @@ func renderSourceRange(
 		}
 	}
 	return writes, nil
+}
+
+func renderSourceTargets(
+	ctx context.Context,
+	src ArchiveMessageSource,
+	outputDir string,
+	timezone string,
+	channelNames channelNameResolver,
+	targets []renderTarget,
+) (int, error) {
+	channels, err := src.Channels(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("loading channels: %w", err)
+	}
+	targetDates := make(map[string][]string)
+	for _, target := range targets {
+		if _, _, err := GetDateBounds(target.date, timezone); err != nil {
+			return 0, err
+		}
+		targetDates[target.channelID] = append(targetDates[target.channelID], target.date)
+	}
+	channels = filterRenderChannels(channels, targetChannelIDs(targets))
+
+	users, err := loadUsers(ctx, src)
+	if err != nil {
+		return 0, err
+	}
+
+	writes := 0
+	for _, ch := range channels {
+		messages, err := loadChannelMessages(ctx, src, ch.ID)
+		if err != nil {
+			return writes, fmt.Errorf("loading channel messages %s: %w", ch.ID, err)
+		}
+		threads := make(threadMessageCache)
+		for _, date := range targetDates[ch.ID] {
+			name := channelNames.fileName(ch)
+			content, err := renderChannelDateFromMessages(ctx, src, RenderRequest{
+				Date:        date,
+				Timezone:    timezone,
+				ChannelID:   ch.ID,
+				ChannelName: name,
+			}, users, messages, threads)
+			if err != nil {
+				return writes, fmt.Errorf("rendering %s %s: %w", date, ch.ID, err)
+			}
+			if content == "" {
+				continue
+			}
+			path := filepath.Join(outputDir, date, fmt.Sprintf("%s-%s.md", date, name))
+			written, err := writeFileIfChanged(path, []byte(content))
+			if err != nil {
+				return writes, err
+			}
+			if written {
+				writes++
+			}
+		}
+	}
+	return writes, nil
+}
+
+func targetChannelIDs(targets []renderTarget) []string {
+	seen := make(map[string]bool)
+	ids := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if !seen[target.channelID] {
+			seen[target.channelID] = true
+			ids = append(ids, target.channelID)
+		}
+	}
+	return ids
 }
 
 func filterRenderChannels(channels []rslack.Channel, channelIDs []string) []rslack.Channel {
